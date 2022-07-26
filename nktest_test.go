@@ -102,8 +102,8 @@ func TestMain(m *testing.M) {
 	code := 0
 	pull := os.Getenv("PULL")
 	nkTest = New(
-		WithBuildModule("./nksample"),
 		WithAlwaysPull(pull != "" && pull != "false" && pull != "0"),
+		WithBuildPath("./nksample"),
 	)
 	if err := nkTest.Run(globalCtx); err == nil {
 		code = m.Run()

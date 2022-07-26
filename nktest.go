@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	dclient "github.com/docker/docker/client"
 	_ "github.com/lib/pq"
 	"github.com/yookoala/realpath"
 	"golang.org/x/mod/semver"
@@ -31,90 +30,100 @@ type Runner struct {
 	name string
 	// dir is the working directory.
 	dir string
-	// cacheDir is the directory for cache.
-	cacheDir string
-	// volumeDir is the directory for docker volumes.
+	// volumeDir is the directory for container volumes.
 	volumeDir string
-	// postgresVersion is the docker tag of the postgres image.
-	postgresVersion string
-	// nakamaVersion is the docker tag of the nakama/nakama-pluginbuilder images.
-	nakamaVersion string
+
 	// httpClient is the http client to use.
 	httpClient *http.Client
 	// alwaysPull forces pulling images.
 	alwaysPull bool
-	// dockerClient is the docker client.
-	dockerClient *dclient.Client
-	// dockerRegistryURL is the docker registry.
+
+	// buildConfigs are the module build configs.
+	buildConfigs []BuildConfig
+
+	// dockerRegistryURL is the docker registry url.
 	dockerRegistryURL string
-	// dockerTokenURL is the docker token.
+	// dockerTokenURL is the docker token url.
 	dockerTokenURL string
-	// dockerAuthName is the docker auth name.
+	// dockerAuthName is the docker token auth name.
 	dockerAuthName string
-	// dockerAuthScope is the docker auth scope mask.
+	// dockerAuthScope is the docker token auth scope mask.
 	dockerAuthScope string
-	//  dockerPostgresId is the image name for the postgres image.
-	dockerPostgresId string
-	//  dockerNakamaId is the image name for the nakama image.
-	dockerNakamaId string
-	// dockerNakamaPluginbuilderId is the image name for the nakama pluginbuilder image.
-	dockerNakamaPluginbuilderId string
+
+	// postgresImageId is the postgres image id.
+	postgresImageId string
+	// nakamaImageId is the nakama image id.
+	nakamaImageId string
+	// pluginbuilderImageId is the nakama pluginbuilder image id.
+	pluginbuilderImageId string
+	// postgresVersion is the tag of the postgres image.
+	postgresVersion string
+	// nakamaVersion is the tag of the nakama/nakama-pluginbuilder images.
+	nakamaVersion string
+
 	// configFilename is the config filename.
 	configFilename string
 	// configTemplate is the config template.
 	configTemplate string
-	// dockerNetworkRemoveDelay is the remove delay for the docker network.
-	dockerNetworkRemoveDelay time.Duration
-	// dockerContainerRemoveDelay is the remove delay for the docker container.
-	dockerContainerRemoveDelay time.Duration
+
+	// networkRemoveDelay is the network remove delay.
+	networkRemoveDelay time.Duration
+	// containerRemoveDelay is the container remove delay.
+	containerRemoveDelay time.Duration
 	// versionCacheTTL is the version cache ttl.
 	versionCacheTTL time.Duration
 	// backoffMaxInterval is the max backoff interval.
 	backoffMaxInterval time.Duration
 	// backoffMaxElapsedTime is the max backoff elapsed time.
 	backoffMaxElapsedTime time.Duration
+
 	// stdout is standard out.
 	stdout io.Writer
 	// stderr is standard error.
 	stderr io.Writer
-	// buildModules are the module packages to build.
-	buildModules []string
 
-	// networkId is the created network id.
-	networkId string
+	// podId is the created network id.
+	podId string
 	// postgresContainerId is the created postgres container id.
 	postgresContainerId string
 	// nakamaContainerId is the created nakama container id.
 	nakamaContainerId string
-	postgresLocal     string
-	postgresRemote    string
-	grpcLocal         string
-	grpcRemote        string
-	httpLocal         string
-	httpRemote        string
+
+	// postgresLocal is the local postgres address.
+	postgresLocal string
+	// postgresRemote is the remote postgres address.
+	postgresRemote string
+	// grpcLocal is the local grpc address.
+	grpcLocal string
+	// grpcRemote is the remote grpc address.
+	grpcRemote string
+	// httpLocal is the local http address.
+	httpLocal string
+	// httpRemote is the remote http address.
+	httpRemote string
 }
 
 // New creates a new nakama test runner.
 func New(opts ...Option) *Runner {
 	t := &Runner{
-		postgresVersion:             "latest",
-		httpClient:                  http.DefaultClient,
-		dockerRegistryURL:           "https://registry-1.docker.io",
-		dockerTokenURL:              "https://auth.docker.io/token",
-		dockerAuthName:              "registry.docker.io",
-		dockerAuthScope:             "repository:%s:pull",
-		dockerPostgresId:            "postgres",
-		dockerNakamaId:              "heroiclabs/nakama",
-		dockerNakamaPluginbuilderId: "heroiclabs/nakama-pluginbuilder",
-		configFilename:              "config.yml",
-		configTemplate:              string(configYmlTpl),
-		versionCacheTTL:             96 * time.Hour,
-		dockerNetworkRemoveDelay:    1500 * time.Millisecond,
-		dockerContainerRemoveDelay:  1500 * time.Millisecond,
-		backoffMaxInterval:          2 * time.Second,
-		backoffMaxElapsedTime:       30 * time.Second,
-		stdout:                      os.Stdout,
-		stderr:                      os.Stderr,
+		httpClient:            http.DefaultClient,
+		dockerRegistryURL:     "https://registry-1.docker.io",
+		dockerTokenURL:        "https://auth.docker.io/token",
+		dockerAuthName:        "registry.docker.io",
+		dockerAuthScope:       "repository:%s:pull",
+		postgresImageId:       "postgres",
+		nakamaImageId:         "heroiclabs/nakama",
+		pluginbuilderImageId:  "heroiclabs/nakama-pluginbuilder",
+		postgresVersion:       "latest",
+		configFilename:        "config.yml",
+		configTemplate:        string(configYmlTpl),
+		versionCacheTTL:       96 * time.Hour,
+		networkRemoveDelay:    1500 * time.Millisecond,
+		containerRemoveDelay:  500 * time.Millisecond,
+		backoffMaxInterval:    2 * time.Second,
+		backoffMaxElapsedTime: 30 * time.Second,
+		stdout:                os.Stdout,
+		stderr:                os.Stderr,
 	}
 	for _, o := range opts {
 		o(t)
@@ -134,15 +143,20 @@ func (t *Runner) Logf(s string, v ...interface{}) {
 
 // Errf logs messages to stdout.
 func (t *Runner) Errf(s string, v ...interface{}) {
-	t.stderr.Write([]byte(strings.TrimRight(fmt.Sprintf(s, v...), "\r\n") + "\n"))
+	t.stderr.Write([]byte(strings.TrimRight("ERROR: "+fmt.Sprintf(s, v...), "\r\n") + "\n"))
 }
 
 // Run handles building the nakama plugin and starting the postgres and
-// nakama server docker containers.
+// nakama server containers.
 func (t *Runner) Run(ctx context.Context) error {
 	// setup project working directory
 	if err := t.Init(); err != nil {
 		return err
+	}
+	// get the podman context
+	ctx, conn, err := PodmanContext(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to create podman client: %w", err)
 	}
 	// determine latest nakama version
 	if err := t.GetNakamaVersion(ctx); err != nil {
@@ -150,28 +164,36 @@ func (t *Runner) Run(ctx context.Context) error {
 	}
 	t.Logf("NAKAMA VERSION: %s", t.nakamaVersion)
 	// retrieve images
-	if err := GrabDockerImages(ctx, t,
-		t.dockerPostgresId+":"+t.postgresVersion,
-		t.dockerNakamaPluginbuilderId+":"+t.nakamaVersion,
-		t.dockerNakamaId+":"+t.nakamaVersion,
+	if err := PodmanPullImages(
+		ctx,
+		conn,
+		t,
+		QualifiedId(t.postgresImageId+":"+t.postgresVersion),
+		QualifiedId(t.pluginbuilderImageId+":"+t.nakamaVersion),
+		QualifiedId(t.nakamaImageId+":"+t.nakamaVersion),
 	); err != nil {
-		return fmt.Errorf("unable to retrieve docker images: %w", err)
+		return fmt.Errorf("unable to retrieve images: %w", err)
 	}
 	// build modules
-	if err := t.BuildModules(ctx); err != nil {
+	if err := t.BuildModules(ctx, conn); err != nil {
 		return fmt.Errorf("unable to build modules: %w", err)
 	}
 	// create network for images
-	var err error
-	if t.networkId, err = CreateDockerNetwork(ctx, t, t.name, t.dockerNetworkRemoveDelay); err != nil {
-		return fmt.Errorf("unable to create network: %w", err)
+	if t.podId, err = PodmanCreatePod(
+		ctx,
+		conn,
+		t,
+		QualifiedId(t.postgresImageId+":"+t.postgresVersion),
+		QualifiedId(t.nakamaImageId+":"+t.nakamaVersion),
+	); err != nil {
+		return fmt.Errorf("unable to create pod: %w", err)
 	}
 	// run postgres
-	if err := t.RunPostgres(ctx); err != nil {
+	if err := t.RunPostgres(ctx, conn); err != nil {
 		return fmt.Errorf("unable to start postgres: %w", err)
 	}
 	// run nakama
-	if err := t.RunNakama(ctx); err != nil {
+	if err := t.RunNakama(ctx, conn); err != nil {
 		return fmt.Errorf("unable to start nakama: %w", err)
 	}
 	return nil
@@ -180,12 +202,6 @@ func (t *Runner) Run(ctx context.Context) error {
 // Init initializes the environment for running nakama-pluginbuilder and nakama
 // images.
 func (t *Runner) Init() error {
-	if t.dockerClient == nil {
-		var err error
-		if t.dockerClient, err = dclient.NewClientWithOpts(dclient.FromEnv, dclient.WithAPIVersionNegotiation()); err != nil {
-			return fmt.Errorf("unable to create docker client: %w", err)
-		}
-	}
 	// use working directory if not set
 	if t.dir == "" {
 		wd, err := os.Getwd()
@@ -261,20 +277,21 @@ func (t *Runner) GetNakamaVersion(ctx context.Context) error {
 	}
 	cacheFile := filepath.Join(cacheDir, "nakama-version")
 	// read cached version
-	if t.nakamaVersion, err = ReadCachedFile(cacheFile, t.versionCacheTTL); err == nil {
+	if ver, err := ReadCachedFile(cacheFile, t.versionCacheTTL); err == nil {
+		t.nakamaVersion = string(bytes.TrimSpace(ver))
 		return nil
 	}
 	t.Logf("REFRESHING NAKAMA VERSION")
 	// get nakama versions
-	nk, err := GetDockerTags(ctx, t, t.dockerNakamaId)
+	nk, err := GetImageTags(ctx, t, t.nakamaImageId)
 	if err != nil {
-		return fmt.Errorf("unable to get tags for %s: %w", t.dockerNakamaId, err)
+		return fmt.Errorf("unable to get tags for %s: %w", t.nakamaImageId, err)
 	}
 	t.Logf("AVAILABLE NAKAMA VERSIONS: %s", strings.Join(nk, ", "))
 	// get nakama-pluginbuilder versions
-	pb, err := GetDockerTags(ctx, t, t.dockerNakamaPluginbuilderId)
+	pb, err := GetImageTags(ctx, t, t.pluginbuilderImageId)
 	if err != nil {
-		return fmt.Errorf("unable to get tags for %s: %w", t.dockerNakamaPluginbuilderId, err)
+		return fmt.Errorf("unable to get tags for %s: %w", t.pluginbuilderImageId, err)
 	}
 	t.Logf("AVAILABLE NAKAMA PLUGINBUILDER VERSIONS: %s", strings.Join(pb, ", "))
 	re := regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -305,23 +322,26 @@ func (t *Runner) GetNakamaVersion(ctx context.Context) error {
 		t.nakamaVersion = ver
 		return nil
 	}
-	return fmt.Errorf("no available version of %s matches available versions for %s", t.dockerNakamaPluginbuilderId, t.dockerNakamaId)
+	return fmt.Errorf("no available version of %s matches available versions for %s", t.pluginbuilderImageId, t.nakamaImageId)
 }
 
 // BuildModules builds the nakama modules.
-func (t *Runner) BuildModules(ctx context.Context) error {
-	for _, dir := range t.buildModules {
-		if err := t.BuildModule(ctx, dir); err != nil {
-			return fmt.Errorf("unable to build module %q: %w", dir, err)
+func (t *Runner) BuildModules(ctx, conn context.Context) error {
+	for i, bc := range t.buildConfigs {
+		if err := t.BuildModule(ctx, conn, bc); err != nil {
+			return fmt.Errorf("unable to build module %d: %w", i, err)
 		}
 	}
 	return nil
 }
 
 // BuildModule builds a nakama plugin module.
-func (t *Runner) BuildModule(ctx context.Context, dir string) error {
-	var err error
-	if dir, err = realpath.Realpath(dir); err != nil {
+func (t *Runner) BuildModule(ctx, conn context.Context, bc BuildConfig) error {
+	if bc.ModulePath == "" {
+		return fmt.Errorf("must supply module path")
+	}
+	dir, err := realpath.Realpath(bc.ModulePath)
+	if err != nil {
 		return fmt.Errorf("unable to determine real path for %s: %w", dir, err)
 	}
 	if err := IsSubDir(t.dir, dir); err != nil {
@@ -332,16 +352,17 @@ func (t *Runner) BuildModule(ctx context.Context, dir string) error {
 		return fmt.Errorf("unable to make %s relative to %s: %w", dir, t.dir, err)
 	}
 	name := filepath.Base(dir)
-	id, err := DockerRun(
+	id, err := PodmanRun(
 		ctx,
+		conn,
 		t,
-		t.dockerNakamaPluginbuilderId+":"+t.nakamaVersion,
-		0,
-		nil,
-		[]string{
-			filepath.Join(t.dir) + ":/builder",
-			filepath.Join(t.volumeDir, "nakama") + ":/nakama",
-		},
+		QualifiedId(t.pluginbuilderImageId+":"+t.nakamaVersion),
+		bc.Env,
+		append(
+			bc.Mounts,
+			filepath.Join(t.dir)+":/builder",
+			filepath.Join(t.volumeDir, "nakama")+":/nakama",
+		),
 		"go",
 		"build",
 		"-trimpath",
@@ -350,12 +371,12 @@ func (t *Runner) BuildModule(ctx context.Context, dir string) error {
 		"./"+pkgDir,
 	)
 	if err != nil {
-		return fmt.Errorf("unable to run %s: %w", t.dockerNakamaPluginbuilderId, err)
+		return fmt.Errorf("unable to run %s: %w", t.pluginbuilderImageId, err)
 	}
-	if err := DockerFollowLogs(ctx, t, id); err != nil {
+	if err := PodmanFollowLogs(ctx, t, id); err != nil {
 		return fmt.Errorf("unable to follow logs for %s: %w", id, err)
 	}
-	if err := DockerWait(ctx, t, id); err != nil {
+	if err := PodmanWait(ctx, t, id); err != nil {
 		return err
 	}
 	out := filepath.Join(t.volumeDir, "nakama", "modules", name+".so")
@@ -379,26 +400,26 @@ func (t *Runner) Backoff(ctx context.Context, f func() error) error {
 }
 
 // RunPostgres runs the postgres server.
-func (t *Runner) RunPostgres(ctx context.Context) error {
+func (t *Runner) RunPostgres(ctx, conn context.Context) error {
 	var err error
-	if t.postgresContainerId, err = DockerRun(
+	if t.postgresContainerId, err = PodmanRun(
 		ctx,
+		conn,
 		t,
-		t.dockerPostgresId+":"+t.postgresVersion,
-		t.dockerContainerRemoveDelay,
-		[]string{
-			"listen_addresses = '*'",
-			"POSTGRES_PASSWORD=" + t.name,
-			"POSTGRES_USER=" + t.name,
-			"POSTGRES_DB=" + t.name,
+		QualifiedId(t.postgresImageId+":"+t.postgresVersion),
+		map[string]string{
+			"listen_addresses":  "'*'",
+			"POSTGRES_PASSWORD": t.name,
+			"POSTGRES_USER":     t.name,
+			"POSTGRES_DB":       t.name,
 		},
 		[]string{
 			filepath.Join(t.volumeDir, "postgres") + ":/var/lib/postgresql/data",
 		},
 	); err != nil {
-		return fmt.Errorf("unable to run %s: %w", t.dockerPostgresId, err)
+		return fmt.Errorf("unable to run %s: %w", t.postgresImageId, err)
 	}
-	if err := DockerServiceWait(ctx, t, t.postgresContainerId, "5432/tcp", func(local, remote string) error {
+	if err := PodmanServiceWait(ctx, t, t.podId, "5432/tcp", func(local, remote string) error {
 		t.postgresLocal = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", t.name, t.name, local, t.name)
 		t.postgresRemote = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", t.name, t.name, remote, t.name)
 		db, err := sql.Open("postgres", t.postgresLocal)
@@ -407,19 +428,19 @@ func (t *Runner) RunPostgres(ctx context.Context) error {
 		}
 		return db.Ping()
 	}); err != nil {
-		return fmt.Errorf("unable to connect to %s: %w", t.dockerPostgresId, err)
+		return fmt.Errorf("unable to connect to postgres %s: %w", t.postgresImageId, err)
 	}
 	return nil
 }
 
 // RunNakama runs the nakama server.
-func (t *Runner) RunNakama(ctx context.Context) error {
+func (t *Runner) RunNakama(ctx, conn context.Context) error {
 	var err error
-	if t.nakamaContainerId, err = DockerRun(
+	if t.nakamaContainerId, err = PodmanRun(
 		ctx,
+		conn,
 		t,
-		t.dockerNakamaId+":"+t.nakamaVersion,
-		t.dockerContainerRemoveDelay,
+		QualifiedId(t.nakamaImageId+":"+t.nakamaVersion),
 		nil,
 		[]string{
 			filepath.Join(t.volumeDir, "nakama") + ":/nakama/data",
@@ -432,12 +453,12 @@ func (t *Runner) RunNakama(ctx context.Context) error {
 			`--config=/nakama/data/config.yml `+
 			`--database.address=`+t.postgresRemote,
 	); err != nil {
-		return fmt.Errorf("unable to run %s: %w", t.dockerNakamaId, err)
+		return fmt.Errorf("unable to run %s: %w", t.nakamaImageId, err)
 	}
-	if err := DockerFollowLogs(ctx, t, t.nakamaContainerId); err != nil {
+	if err := PodmanFollowLogs(ctx, t, t.nakamaContainerId); err != nil {
 		return fmt.Errorf("unable to follow logs for %s: %w", t.nakamaContainerId, err)
 	}
-	if err := DockerServiceWait(ctx, t, t.nakamaContainerId, "7350/tcp", func(local, remote string) error {
+	if err := PodmanServiceWait(ctx, t, t.podId, "7350/tcp", func(local, remote string) error {
 		t.httpLocal = "http://" + local
 		t.httpRemote = "http://" + remote
 		req, err := http.NewRequestWithContext(ctx, "GET", t.httpLocal, nil)
@@ -455,14 +476,14 @@ func (t *Runner) RunNakama(ctx context.Context) error {
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("unable to connect to %s (http): %w", t.dockerNakamaId, err)
+		return fmt.Errorf("unable to connect to %s (http): %w", t.nakamaImageId, err)
 	}
-	if err := DockerServiceWait(ctx, t, t.nakamaContainerId, "7349/tcp", func(local, remote string) error {
+	if err := PodmanServiceWait(ctx, t, t.podId, "7349/tcp", func(local, remote string) error {
 		t.grpcLocal = local
 		t.grpcRemote = remote
 		return nil
 	}); err != nil {
-		return fmt.Errorf("unable to connect to %s (grpc): %w", t.dockerNakamaId, err)
+		return fmt.Errorf("unable to connect to %s (grpc): %w", t.nakamaImageId, err)
 	}
 	return nil
 }
@@ -472,49 +493,44 @@ func (t *Runner) HttpClient() *http.Client {
 	return t.httpClient
 }
 
-// DockerClient returns the docker client for the test runner.
-func (t *Runner) DockerClient() *dclient.Client {
-	return t.dockerClient
-}
-
 // AlwaysPull returns whether or not to always pull an image.
 func (t *Runner) AlwaysPull() bool {
 	return t.alwaysPull
 }
 
-// DockerRegistryURL returns the docker registry URL.
+// DockerRegistryURL returns the docker registry url.
 func (t *Runner) DockerRegistryURL() string {
 	return t.dockerRegistryURL
 }
 
-// DockerTokenURL returns the docker token URL.
+// DockerTokenURL returns the docker token url.
 func (t *Runner) DockerTokenURL() string {
 	return t.dockerTokenURL
 }
 
-// DockerAuthName returns the token auth name for docker.
+// DockerAuthName returns the docker token auth name.
 func (t *Runner) DockerAuthName() string {
 	return t.dockerAuthName
 }
 
-// DockerAuthScope returns the auth scope for a image id.
+// DockerAuthScope returns the docker token auth scope for a image id.
 func (t *Runner) DockerAuthScope(id string) string {
 	return fmt.Sprintf(t.dockerAuthScope, id)
 }
 
-// NetworkId returns the docker network id.
-func (t *Runner) NetworkId() string {
-	return t.networkId
+// PodId returns the pod id.
+func (t *Runner) PodId() string {
+	return t.podId
 }
 
-// Stderr returns stderr.
-func (t *Runner) Stderr() io.Writer {
-	return t.stderr
+// Stdout returns a prefixed writer for output.
+func (t *Runner) Stdout(prefix string) io.Writer {
+	return NewPrefixedWriter(t.stdout, prefix+": ")
 }
 
-// Stdout returns stdout.
-func (t *Runner) Stdout() io.Writer {
-	return t.stdout
+// Stderr returns a prefixed writer for errors.
+func (t *Runner) Stderr(prefix string) io.Writer {
+	return NewPrefixedWriter(t.stderr, prefix+": ")
 }
 
 // PostgresLocal returns the postgres local address.
@@ -552,6 +568,16 @@ func (t *Runner) Name() string {
 	return t.name
 }
 
+// NetworkRemoveDelay returns the network remove delay.
+func (t *Runner) NetworkRemoveDelay() time.Duration {
+	return t.networkRemoveDelay
+}
+
+// ContainerRemoveDelay returns the container remove delay.
+func (t *Runner) ContainerRemoveDelay() time.Duration {
+	return t.containerRemoveDelay
+}
+
 // Option is a nakama test runner option.
 type Option func(*Runner)
 
@@ -562,133 +588,162 @@ func WithName(name string) Option {
 	}
 }
 
-// WithDir is a nakama test runner option to set the root dir.
+// WithDir is a nakama test runner option to set the project root dir.
 func WithDir(dir string) Option {
 	return func(t *Runner) {
 		t.dir = dir
 	}
 }
 
-// WithCacheDir is a nakama test runner option to set the cacheDir.
-func WithCacheDir(cacheDir string) Option {
-	return func(t *Runner) {
-		t.cacheDir = cacheDir
-	}
-}
-
-// WithVolumeDir is a nakama test runner option to set the volumeDir.
+// WithVolumeDir is a nakama test runner option to set the volume dir, where
+// nakama and postgres data/configs are written. Default is <project
+// root>/.cache. Must be a sub dir of the project root.
 func WithVolumeDir(volumeDir string) Option {
 	return func(t *Runner) {
 		t.volumeDir = volumeDir
 	}
 }
 
-// WithPostgresVersion is a nakama test runner option to set the postgresVersion.
+// WithPostgresImageId is a nakama test runner option to set the postgres image
+// id.
+func WithPostgresImageId(postgresImageId string) Option {
+	return func(t *Runner) {
+		t.postgresImageId = postgresImageId
+	}
+}
+
+// WithNakamaImageId is a nakama test runner option to set the nakama image id.
+func WithNakamaImageId(nakamaImageId string) Option {
+	return func(t *Runner) {
+		t.nakamaImageId = nakamaImageId
+	}
+}
+
+// WithPluginbuilderImageId is a nakama test runner option to set the
+// pluginbuilder image id.
+func WithPluginbuilderImageId(pluginbuilderImageId string) Option {
+	return func(t *Runner) {
+		t.pluginbuilderImageId = pluginbuilderImageId
+	}
+}
+
+// WithPostgresVersion is a nakama test runner option to set the postgres
+// image tag.
 func WithPostgresVersion(postgresVersion string) Option {
 	return func(t *Runner) {
 		t.postgresVersion = postgresVersion
 	}
 }
 
-// WithNakamaVersion is a nakama test runner option to set the nakamaVersion.
+// WithNakamaVersion is a nakama test runner option to set the nakama image
+// tag.
 func WithNakamaVersion(nakamaVersion string) Option {
 	return func(t *Runner) {
 		t.nakamaVersion = nakamaVersion
 	}
 }
 
-// WithHttpClient is a nakama test runner option to set the httpClient.
+// WithHttpClient is a nakama test runner option to set a http client used.
+// Used for generating auth tokens for image repositories.
 func WithHttpClient(httpClient *http.Client) Option {
 	return func(t *Runner) {
 		t.httpClient = httpClient
 	}
 }
 
-// WithAlwaysPull is a nakama test runner option to set the alwaysPull.
+// WithAlwaysPull is a nakama test runner option to set the always pull flag.
+// When true, causes container images to be pulled regardless of if they are
+// available on the host or not.
 func WithAlwaysPull(alwaysPull bool) Option {
 	return func(t *Runner) {
 		t.alwaysPull = alwaysPull
 	}
 }
 
-// WithDockerClient is a nakama test runner option to set the dockerClient.
-func WithDockerClient(dockerClient *dclient.Client) Option {
-	return func(t *Runner) {
-		t.dockerClient = dockerClient
-	}
-}
-
-// WithDockerRegistryURL is a nakama test runner option to set the dockerRegistryURL.
+// WithDockerRegistryURL is a nakama test runner option to set the docker
+// registry url used for retrieving images.
 func WithDockerRegistryURL(dockerRegistryURL string) Option {
 	return func(t *Runner) {
 		t.dockerRegistryURL = dockerRegistryURL
 	}
 }
 
-// WithDockerTokenURL is a nakama test runner option to set the dockerTokenURL.
+// WithDockerTokenURL is a nakama test runner option to set the docker token
+// url, used for generating auth tokens when pulling images.
 func WithDockerTokenURL(dockerTokenURL string) Option {
 	return func(t *Runner) {
 		t.dockerTokenURL = dockerTokenURL
 	}
 }
 
-// WithDockerAuthName is a nakama test runner option to set the dockerAuthName.
+// WithDockerAuthName is a nakama test runner option to set the docker token
+// auth name used when generating auth tokens for the docker registry.
 func WithDockerAuthName(dockerAuthName string) Option {
 	return func(t *Runner) {
 		t.dockerAuthName = dockerAuthName
 	}
 }
 
-// WithDockerAuthScope is a nakama test runner option to set the dockerAuthScope.
+// WithDockerAuthScope is a nakama test runner option to set a docker token
+// auth scope mask. Must include "%s" to interpolate the image id.
 func WithDockerAuthScope(dockerAuthScope string) Option {
 	return func(t *Runner) {
 		t.dockerAuthScope = dockerAuthScope
 	}
 }
 
-// WithConfigFilename is a nakama test runner option to set the configFilename.
+// WithConfigFilename is a nakama test runner option to set the config
+// filename.
 func WithConfigFilename(configFilename string) Option {
 	return func(t *Runner) {
 		t.configFilename = configFilename
 	}
 }
 
-// WithConfigTemplate is a nakama test runner option to set the configTemplate.
+// WithConfigTemplate is a nakama test runner option to set the config
+// template.
 func WithConfigTemplate(configTemplate string) Option {
 	return func(t *Runner) {
 		t.configTemplate = configTemplate
 	}
 }
 
-// WithDockerNetworkRemoveDelay is a nakama test runner option to set the dockerNetworkRemoveDelay.
-func WithDockerNetworkRemoveDelay(dockerNetworkRemoveDelay time.Duration) Option {
+// WithNetworkRemoveDelay is a nakama test runner option to set the container
+// network remove delay.
+func WithNetworkRemoveDelay(networkRemoveDelay time.Duration) Option {
 	return func(t *Runner) {
-		t.dockerNetworkRemoveDelay = dockerNetworkRemoveDelay
+		t.networkRemoveDelay = networkRemoveDelay
 	}
 }
 
-// WithDockerContainerRemoveDelay is a nakama test runner option to set the dockerContainerRemoveDelay.
-func WithDockerContainerRemoveDelay(dockerContainerRemoveDelay time.Duration) Option {
+// WithContainerRemoveDelay is a nakama test runner option to set the container
+// remove delay.
+func WithContainerRemoveDelay(containerRemoveDelay time.Duration) Option {
 	return func(t *Runner) {
-		t.dockerContainerRemoveDelay = dockerContainerRemoveDelay
+		t.containerRemoveDelay = containerRemoveDelay
 	}
 }
 
-// WithVersionCacheTTL is a nakama test runner option to set the versionCacheTTL.
+// WithVersionCacheTTL is a nakama test runner option to set the version cache
+// TTL.
 func WithVersionCacheTTL(versionCacheTTL time.Duration) Option {
 	return func(t *Runner) {
 		t.versionCacheTTL = versionCacheTTL
 	}
 }
 
-// WithBackoffMaxInterval is a nakama test runner option to set the backoffMaxInterval.
+// WithBackoffMaxInterval is a nakama test runner option to set the backoff max
+// interval for waiting for services (ie, postres, nakama) to start/become
+// available.
 func WithBackoffMaxInterval(backoffMaxInterval time.Duration) Option {
 	return func(t *Runner) {
 		t.backoffMaxInterval = backoffMaxInterval
 	}
 }
 
-// WithBackoffMaxElapsedTime is a nakama test runner option to set the backoffMaxElapsedTime.
+// WithBackoffMaxElapsedTime is a nakama test runner option to set the backoff
+// max elapsed time for waiting for services (ie, postgres, nakama) to
+// start/become available.
 func WithBackoffMaxElapsedTime(backoffMaxElapsedTime time.Duration) Option {
 	return func(t *Runner) {
 		t.backoffMaxElapsedTime = backoffMaxElapsedTime
@@ -709,30 +764,113 @@ func WithStderr(stderr io.Writer) Option {
 	}
 }
 
-// WithBuildModule is a nakama test runner option to add a module path to build.
-func WithBuildModule(modulePath string) Option {
+// WithBuildConfig is a nakama test runner option to add a module path to the
+// build config.
+func WithBuildConfig(bc BuildConfig) Option {
 	return func(t *Runner) {
-		t.buildModules = append(t.buildModules, modulePath)
+		t.buildConfigs = append(t.buildConfigs, bc)
 	}
+}
+
+// WithBuildPath is a nakama test runner option to add a module path, and extra
+// options to the build config.
+func WithBuildPath(modulePath string, opts ...BuildConfigOption) Option {
+	return func(t *Runner) {
+		bc := BuildConfig{
+			ModulePath: modulePath,
+		}
+		for _, o := range opts {
+			o(&bc)
+		}
+		WithBuildConfig(bc)(t)
+	}
+}
+
+// BuildConfig is a nakama module build config.
+type BuildConfig struct {
+	// ModulePath is the package build path for the module. Must be sub dir of
+	// the working directory.
+	ModulePath string
+	// Out is the out filename of the module. Will be written to
+	// modules/<name>.
+	Out string
+	// Env are additional environment variables to pass to
+	Env map[string]string
+	// Mounts are additional volume mounts.
+	Mounts []string
+}
+
+// BuildConfigOption is nakama module build config option.
+type BuildConfigOption func(*BuildConfig)
+
+// WithOut is a nakama module build config option to set the out name. When not
+// specified, the name will be derived from the directory name of the module.
+func WithOut(out string) BuildConfigOption {
+	return func(bc *BuildConfig) {
+		bc.Out = out
+	}
+}
+
+// WithEnv is a nakama module build config option to set additional env
+// variables used during builds.
+func WithEnv(env map[string]string) BuildConfigOption {
+	return func(bc *BuildConfig) {
+		bc.Env = env
+	}
+}
+
+// WithMounts is a nakama module build config option to set additional mounts
+// variables used during builds.
+func WithMounts(mounts ...string) BuildConfigOption {
+	return func(bc *BuildConfig) {
+		bc.Mounts = mounts
+	}
+}
+
+// PrefixedWriter is a prefixed writer.
+type PrefixedWriter struct {
+	w      io.Writer
+	prefix []byte
+}
+
+// NewPrefixedWriter creates a new prefixed writer.
+func NewPrefixedWriter(w io.Writer, prefix string) *PrefixedWriter {
+	return &PrefixedWriter{
+		w:      w,
+		prefix: []byte(prefix),
+	}
+}
+
+// Write satisfies the io.Writer interface.
+func (w *PrefixedWriter) Write(buf []byte) (int, error) {
+	return w.w.Write(
+		append(
+			w.prefix,
+			append(
+				bytes.ReplaceAll(
+					bytes.TrimRight(buf, "\r\n"),
+					[]byte{'\n'},
+					append([]byte{'\n'}, w.prefix...),
+				),
+				'\n',
+			)...,
+		),
+	)
 }
 
 // ReadCachedFile reads a cached file from disk, returns error if the file name
 // on disk is past the ttl.
-func ReadCachedFile(name string, ttl time.Duration) (string, error) {
+func ReadCachedFile(name string, ttl time.Duration) ([]byte, error) {
 	fi, err := os.Stat(name)
 	switch {
 	case err != nil:
-		return "", err
+		return nil, err
 	case fi.IsDir():
-		return "", fmt.Errorf("%s is a directory", name)
+		return nil, fmt.Errorf("%s is a directory", name)
 	case fi.ModTime().Add(ttl).Before(time.Now()):
-		return "", fmt.Errorf("%s needs to be refreshed (past %v)", name, ttl)
+		return nil, fmt.Errorf("%s needs to be refreshed (past %v)", name, ttl)
 	}
-	buf, err := ioutil.ReadFile(name)
-	if err != nil {
-		return "", err
-	}
-	return string(bytes.TrimSpace(buf)), nil
+	return ioutil.ReadFile(name)
 }
 
 // IsSubDir determines if b is subdir of a.
