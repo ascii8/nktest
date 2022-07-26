@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -328,7 +329,7 @@ func (t *Runner) GetNakamaVersion(ctx context.Context) error {
 // BuildModules builds the nakama modules.
 func (t *Runner) BuildModules(ctx, conn context.Context) error {
 	for i, bc := range t.buildConfigs {
-		if err := t.BuildModule(ctx, conn, bc); err != nil {
+		if err := t.BuildModule(ctx, conn, &bc); err != nil {
 			return fmt.Errorf("unable to build module %d: %w", i, err)
 		}
 	}
@@ -336,14 +337,16 @@ func (t *Runner) BuildModules(ctx, conn context.Context) error {
 }
 
 // BuildModule builds a nakama plugin module.
-func (t *Runner) BuildModule(ctx, conn context.Context, bc BuildConfig) error {
-	if bc.ModulePath == "" {
+func (t *Runner) BuildModule(ctx, conn context.Context, bc *BuildConfig) error {
+	// check module path
+	if bc.modulePath == "" {
 		return fmt.Errorf("must supply module path")
 	}
-	dir, err := realpath.Realpath(bc.ModulePath)
+	dir, err := realpath.Realpath(bc.modulePath)
 	if err != nil {
 		return fmt.Errorf("unable to determine real path for %s: %w", dir, err)
 	}
+	// ensure module path is sub dir
 	if err := IsSubDir(t.dir, dir); err != nil {
 		return fmt.Errorf("%s must be subdir of %s: %w", dir, t.dir, err)
 	}
@@ -351,15 +354,27 @@ func (t *Runner) BuildModule(ctx, conn context.Context, bc BuildConfig) error {
 	if err != nil {
 		return fmt.Errorf("unable to make %s relative to %s: %w", dir, t.dir, err)
 	}
-	name := filepath.Base(dir)
+	// apply module opts
+	for _, o := range bc.opts {
+		if err := o(bc); err != nil {
+			return fmt.Errorf("unable to configure module %s: %w", bc.modulePath, err)
+		}
+	}
+	// set defaults
+	if bc.name == "" {
+		bc.name = filepath.Base(dir)
+	}
+	if bc.out == "" {
+		bc.out = bc.name + ".so"
+	}
 	id, err := PodmanRun(
 		ctx,
 		conn,
 		t,
 		QualifiedId(t.pluginbuilderImageId+":"+t.nakamaVersion),
-		bc.Env,
+		bc.env,
 		append(
-			bc.Mounts,
+			bc.mounts,
 			filepath.Join(t.dir)+":/builder",
 			filepath.Join(t.volumeDir, "nakama")+":/nakama",
 		),
@@ -367,7 +382,7 @@ func (t *Runner) BuildModule(ctx, conn context.Context, bc BuildConfig) error {
 		"build",
 		"-trimpath",
 		"-buildmode=plugin",
-		"-o=/nakama/modules/"+name+".so",
+		"-o=/nakama/modules/"+bc.out,
 		"./"+pkgDir,
 	)
 	if err != nil {
@@ -379,7 +394,7 @@ func (t *Runner) BuildModule(ctx, conn context.Context, bc BuildConfig) error {
 	if err := PodmanWait(ctx, t, id); err != nil {
 		return err
 	}
-	out := filepath.Join(t.volumeDir, "nakama", "modules", name+".so")
+	out := filepath.Join(t.volumeDir, "nakama", "modules", bc.out)
 	fi, err := os.Stat(out)
 	switch {
 	case err != nil && errors.Is(err, os.ErrNotExist):
@@ -764,66 +779,170 @@ func WithStderr(stderr io.Writer) Option {
 	}
 }
 
-// WithBuildConfig is a nakama test runner option to add a module path to the
-// build config.
-func WithBuildConfig(bc BuildConfig) Option {
-	return func(t *Runner) {
-		t.buildConfigs = append(t.buildConfigs, bc)
-	}
-}
-
-// WithBuildPath is a nakama test runner option to add a module path, and extra
+// WithBuildConfig is a nakama test runner option to add a module path, and extra
 // options to the build config.
-func WithBuildPath(modulePath string, opts ...BuildConfigOption) Option {
+func WithBuildConfig(modulePath string, opts ...BuildConfigOption) Option {
 	return func(t *Runner) {
-		bc := BuildConfig{
-			ModulePath: modulePath,
-		}
-		for _, o := range opts {
-			o(&bc)
-		}
-		WithBuildConfig(bc)(t)
+		t.buildConfigs = append(t.buildConfigs, BuildConfig{
+			modulePath: modulePath,
+			opts:       opts,
+		})
 	}
 }
 
 // BuildConfig is a nakama module build config.
 type BuildConfig struct {
-	// ModulePath is the package build path for the module. Must be sub dir of
+	// modulePath is the package build path for the module. Must be sub dir of
 	// the working directory.
-	ModulePath string
-	// Out is the out filename of the module. Will be written to
+	modulePath string
+	// opts are the module options.
+	opts []BuildConfigOption
+	// name is the name of the module.
+	name string
+	// out is the out filename of the module. Will be written to
 	// modules/<name>.
-	Out string
-	// Env are additional environment variables to pass to
-	Env map[string]string
-	// Mounts are additional volume mounts.
-	Mounts []string
+	out string
+	// env are additional environment variables to pass to
+	env map[string]string
+	// mounts are additional volume mounts.
+	mounts []string
 }
 
 // BuildConfigOption is nakama module build config option.
-type BuildConfigOption func(*BuildConfig)
+type BuildConfigOption func(*BuildConfig) error
 
 // WithOut is a nakama module build config option to set the out name. When not
 // specified, the name will be derived from the directory name of the module.
 func WithOut(out string) BuildConfigOption {
-	return func(bc *BuildConfig) {
-		bc.Out = out
+	return func(bc *BuildConfig) error {
+		bc.out = out
+		return nil
 	}
 }
 
 // WithEnv is a nakama module build config option to set additional env
 // variables used during builds.
 func WithEnv(env map[string]string) BuildConfigOption {
-	return func(bc *BuildConfig) {
-		bc.Env = env
+	return func(bc *BuildConfig) error {
+		if bc.env == nil {
+			bc.env = make(map[string]string)
+		}
+		for k, v := range env {
+			bc.env[k] = v
+		}
+		return nil
 	}
 }
 
+// WithGoEnv is a nakama module build config option to copy the host Go
+// environment variables.
+func WithGoEnv(env ...string) BuildConfigOption {
+	return func(bc *BuildConfig) error {
+		if bc.env == nil {
+			bc.env = make(map[string]string)
+		}
+		goPath, err := exec.LookPath("go")
+		if err != nil {
+			return fmt.Errorf("unable to locate go")
+		}
+		for _, k := range env {
+			v, err := GoEnvVar(goPath, k)
+			if err != nil {
+				return fmt.Errorf("unable to exec go env %s: %w", k, err)
+			}
+			bc.env[k] = v
+		}
+		return nil
+	}
+}
+
+// WithDefaultGoEnv is a nakama module build config option to copy default host
+// environment variables for Go.
+//
+// Copies:
+//	GONOPROXY
+//	GONOSUMDB
+//	GOPRIVATE
+//	GOPROXY
+//	GOSUMDB
+func WithDefaultGoEnv() BuildConfigOption {
+	return WithGoEnv(
+		"GONOPROXY",
+		"GONOSUMDB",
+		"GOPRIVATE",
+		"GOPROXY",
+		"GOSUMDB",
+	)
+}
+
 // WithMounts is a nakama module build config option to set additional mounts
-// variables used during builds.
+// used during builds.
 func WithMounts(mounts ...string) BuildConfigOption {
-	return func(bc *BuildConfig) {
-		bc.Mounts = mounts
+	return func(bc *BuildConfig) error {
+		bc.mounts = append(bc.mounts, mounts...)
+		return nil
+	}
+}
+
+// WithGoVolumes is a nakama module build config option to mount the host's Go
+// directories (ie, the Go environment's GOCACHE, GOMODCACHE, and GOPATH
+// locations) to the plugin builder container. Significantly speeds up build
+// times.
+//
+// Note: use WithDefaultGoVolumes (see below).
+func WithGoEnvVolumes(volumes ...EnvVolumeInfo) BuildConfigOption {
+	return func(bc *BuildConfig) error {
+		goPath, err := exec.LookPath("go")
+		if err != nil {
+			return fmt.Errorf("unable to locate go")
+		}
+		for _, vol := range volumes {
+			v, err := GoEnvVar(goPath, vol.Key)
+			if err != nil {
+				return fmt.Errorf("unable to exec go env %s: %w", vol.Key, err)
+			}
+			if vol.Sub != "" {
+				v = filepath.Join(v, vol.Sub)
+			}
+			v, err = realpath.Realpath(v)
+			if err != nil {
+				key := vol.Key
+				if vol.Sub != "" {
+					key += "/" + vol.Sub
+				}
+				return fmt.Errorf("unable to get real path for go env %s (%s): %w", key, v, err)
+			}
+			bc.mounts = append(bc.mounts, v+":"+vol.Target)
+		}
+		return nil
+	}
+}
+
+// WithGoVolumes is a nakama module build config option to mount the host's Go
+// directories (GOCACHE, GOMODCACHE, and GOPATH) to the plugin builder
+// container. Significantly speeds up build times.
+func WithDefaultGoVolumes() BuildConfigOption {
+	return WithGoEnvVolumes(
+		NewEnvVolume("GOCACHE", "/root/.cache/go-build", ""),
+		NewEnvVolume("GOMODCACHE", "/go/pkg/mod", ""),
+		NewEnvVolume("GOPATH", "/go/src", "src"),
+	)
+}
+
+// EnvVolumeInfo holds information about an environment variable derived
+// volume.
+type EnvVolumeInfo struct {
+	Key    string
+	Target string
+	Sub    string
+}
+
+// NewEnvVolume creates a new environment volume.
+func NewEnvVolume(key, target, sub string) EnvVolumeInfo {
+	return EnvVolumeInfo{
+		Key:    key,
+		Target: target,
+		Sub:    sub,
 	}
 }
 
@@ -897,6 +1016,17 @@ func IsSubDir(a, b string) error {
 		b = n
 	}
 	return fmt.Errorf("%s is not a subdir of %s", b, a)
+}
+
+// GoEnvVar reads the go env variable from `go env <name>`.
+func GoEnvVar(goPath, name string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	buf, err := exec.CommandContext(ctx, goPath, "env", name).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(buf)), nil
 }
 
 //go:embed config.yml.tpl

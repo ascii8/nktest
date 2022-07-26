@@ -103,7 +103,7 @@ func TestMain(m *testing.M) {
 	pull := os.Getenv("PULL")
 	nkTest = New(
 		WithAlwaysPull(pull != "" && pull != "false" && pull != "0"),
-		WithBuildPath("./nksample"),
+		WithBuildConfig("./nksample", WithDefaultGoEnv(), WithDefaultGoVolumes()),
 	)
 	if err := nkTest.Run(globalCtx); err == nil {
 		code = m.Run()
@@ -112,6 +112,6 @@ func TestMain(m *testing.M) {
 		code = 1
 	}
 	cancel()
-	<-time.After(3 * time.Second)
+	<-time.After(2200 * time.Millisecond)
 	os.Exit(code)
 }

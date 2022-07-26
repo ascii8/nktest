@@ -72,7 +72,7 @@ func PodmanContext(ctx context.Context) (context.Context, context.Context, error
 func PodmanPullImages(ctx, conn context.Context, h Handler, ids ...string) error {
 	for _, id := range ids {
 		// skip if the image exists
-		if img, err := pimages.GetImage(ctx, id, nil); err == nil || !h.AlwaysPull() {
+		if img, err := pimages.GetImage(ctx, id, nil); err == nil && !h.AlwaysPull() {
 			h.Logf("EXISTING: %s %s", id, ShortId(img.ID))
 			continue
 		}
