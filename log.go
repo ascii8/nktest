@@ -23,56 +23,56 @@ type Logger interface {
 	Transport(http.RoundTripper) http.RoundTripper
 }
 
-// log wraps a log func.
-type log struct {
+// writeLogger wraps a log func.
+type writeLogger struct {
 	f func(string, ...interface{})
 }
 
 // NewLogger creates a new logger/writer.
 func NewLogger(f func(string, ...interface{})) Logger {
-	return &log{f: f}
+	return &writeLogger{f: f}
 }
 
 // TruncatedLogger creates a truncating logger/writer.
 func TruncatedLogger() Logger {
-	return &log{}
+	return &writeLogger{}
 }
 
 // Write satisfies the io.Writer interface.
-func (f *log) Write(buf []byte) (int, error) {
-	if f.f != nil {
-		f.f(string(buf))
+func (wl *writeLogger) Write(buf []byte) (int, error) {
+	if wl.f != nil {
+		wl.f(string(buf))
 	}
 	return len(buf), nil
 }
 
 // Logf satisfies the Logger interface.
-func (f *log) Logf(s string, v ...interface{}) {
-	if f.f != nil {
-		f.f(s, v...)
+func (wl *writeLogger) Logf(s string, v ...interface{}) {
+	if wl.f != nil {
+		wl.f(s, v...)
 	}
 }
 
 // Errf satisfies the logger interface.
-func (f *log) Errf(s string, v ...interface{}) {
-	if f.f != nil {
-		f.f(s, v...)
+func (wl *writeLogger) Errf(s string, v ...interface{}) {
+	if wl.f != nil {
+		wl.f(s, v...)
 	}
 }
 
 // Stdout satisfies the Logger interface.
-func (f *log) Stdout(prefix string) io.Writer {
-	return NewPrefixedWriter(f, prefix)
+func (wl *writeLogger) Stdout(prefix string) io.Writer {
+	return NewPrefixedWriter(wl, prefix)
 }
 
 // Stderr satisfies the Logger interface.
-func (f *log) Stderr(prefix string) io.Writer {
-	return NewPrefixedWriter(f, prefix)
+func (wl *writeLogger) Stderr(prefix string) io.Writer {
+	return NewPrefixedWriter(wl, prefix)
 }
 
 // Transport satisfies the Logger interface.
-func (f *log) Transport(transport http.RoundTripper) http.RoundTripper {
-	return NewTransport(f.Stdout(DefaultOutPrefix), f.Stdout(DefaultInPrefix), transport)
+func (wl *writeLogger) Transport(transport http.RoundTripper) http.RoundTripper {
+	return NewTransport(wl.Stdout(DefaultOutPrefix), wl.Stdout(DefaultInPrefix), transport)
 }
 
 // PrefixedWriter is a prefixed writer.

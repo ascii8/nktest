@@ -597,6 +597,11 @@ func (t *Runner) Name() string {
 	return t.name
 }
 
+// ServerKey returns the server key.
+func (t *Runner) ServerKey() string {
+	return t.name + "_server"
+}
+
 // NetworkRemoveDelay returns the network remove delay.
 func (t *Runner) NetworkRemoveDelay() time.Duration {
 	return t.networkRemoveDelay
