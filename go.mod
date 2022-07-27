@@ -6,12 +6,14 @@ require (
 	github.com/cenkalti/backoff/v4 v4.1.3
 	github.com/containers/common v0.47.5
 	github.com/containers/podman/v4 v4.0.3
+	github.com/gorilla/websocket v1.5.0
 	github.com/heroiclabs/nakama-common v1.23.0
 	github.com/lib/pq v1.10.6
 	github.com/opencontainers/runtime-spec v1.0.3-0.20211214071223-8958f93039ab
 	github.com/teivah/onecontext v1.3.0
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/mod v0.5.1
+	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
+	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3
 )
 
 require (

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"os/signal"
 	"strings"
@@ -22,11 +21,21 @@ var globalCtx context.Context
 var nkTest *Runner
 
 func TestHealthcheck(t *testing.T) {
-	req, err := http.NewRequest("GET", nkTest.HttpLocal()+"/healthcheck", nil)
+	urlstr, err := nkTest.RunProxy(globalCtx, WithLogf(t.Logf))
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	cl := &http.Client{}
+	urlstr += "/healthcheck"
+	t.Logf("url: %s", urlstr)
+	req, err := http.NewRequest("GET", urlstr, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	cl := &http.Client{
+		Transport: &http.Transport{
+			DisableCompression: true,
+		},
+	}
 	res, err := cl.Do(req)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -49,24 +58,20 @@ func TestGoEchoSample(t *testing.T) {
 	}
 	urlstr := nkTest.HttpLocal() + "/v2/rpc/go_echo_sample?unwrap=true&http_key=" + nkTest.Name()
 	t.Logf("url: %s", urlstr)
-	t.Logf("body: %s", buf.String())
 	req, err := http.NewRequest("POST", urlstr, strings.NewReader(strings.TrimSpace(buf.String())))
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	cl := &http.Client{}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	cl := &http.Client{
+		Transport: NewLogger(t.Logf).Transport(nil),
+	}
 	res, err := cl.Do(req)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 	defer res.Body.Close()
-	resBuf, err := httputil.DumpResponse(res, true)
-	if err != nil {
-		t.Fatalf("unable to dump response: %v", err)
-	}
-	t.Logf("response:\n%s", string(resBuf))
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected %d, got: %d", http.StatusOK, res.StatusCode)
 	}

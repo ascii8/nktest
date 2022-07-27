@@ -107,7 +107,6 @@ type Runner struct {
 // New creates a new nakama test runner.
 func New(opts ...Option) *Runner {
 	t := &Runner{
-		httpClient:            http.DefaultClient,
 		dockerRegistryURL:     "https://registry-1.docker.io",
 		dockerTokenURL:        "https://auth.docker.io/token",
 		dockerAuthName:        "registry.docker.io",
@@ -129,6 +128,11 @@ func New(opts ...Option) *Runner {
 	for _, o := range opts {
 		o(t)
 	}
+	if t.httpClient == nil {
+		t.httpClient = &http.Client{
+			Transport: t.Transport(nil),
+		}
+	}
 	return t
 }
 
@@ -139,12 +143,12 @@ func (t *Runner) Write(buf []byte) (int, error) {
 
 // Logf logs messages to stdout.
 func (t *Runner) Logf(s string, v ...interface{}) {
-	t.stdout.Write([]byte(strings.TrimRight(fmt.Sprintf(s, v...), "\r\n") + "\n"))
+	_, _ = t.stdout.Write([]byte(strings.TrimRight(fmt.Sprintf(s, v...), "\r\n") + "\n"))
 }
 
 // Errf logs messages to stdout.
 func (t *Runner) Errf(s string, v ...interface{}) {
-	t.stderr.Write([]byte(strings.TrimRight("ERROR: "+fmt.Sprintf(s, v...), "\r\n") + "\n"))
+	_, _ = t.stderr.Write([]byte(strings.TrimRight("ERROR: "+fmt.Sprintf(s, v...), "\r\n") + "\n"))
 }
 
 // Run handles building the nakama plugin and starting the postgres and
@@ -503,6 +507,11 @@ func (t *Runner) RunNakama(ctx, conn context.Context) error {
 	return nil
 }
 
+// RunProxy creates and runs a http proxy until the context is closed.
+func (t *Runner) RunProxy(ctx context.Context, opts ...ProxyOption) (string, error) {
+	return NewProxy(append([]ProxyOption{WithLogger(t)}, opts...)...).Run(ctx, t.httpLocal)
+}
+
 // HttpClient returns the http client for the test runner.
 func (t *Runner) HttpClient() *http.Client {
 	return t.httpClient
@@ -540,12 +549,17 @@ func (t *Runner) PodId() string {
 
 // Stdout returns a prefixed writer for output.
 func (t *Runner) Stdout(prefix string) io.Writer {
-	return NewPrefixedWriter(t.stdout, prefix+": ")
+	return NewPrefixedWriter(t.stdout, prefix)
 }
 
 // Stderr returns a prefixed writer for errors.
 func (t *Runner) Stderr(prefix string) io.Writer {
-	return NewPrefixedWriter(t.stderr, prefix+": ")
+	return NewPrefixedWriter(t.stderr, prefix)
+}
+
+// Transport satisfies the logger interface.
+func (t *Runner) Transport(transport http.RoundTripper) http.RoundTripper {
+	return NewTransport(t.Stdout(DefaultOutPrefix), t.Stdout(DefaultInPrefix), transport)
 }
 
 // PostgresLocal returns the postgres local address.
@@ -944,37 +958,6 @@ func NewEnvVolume(key, target, sub string) EnvVolumeInfo {
 		Target: target,
 		Sub:    sub,
 	}
-}
-
-// PrefixedWriter is a prefixed writer.
-type PrefixedWriter struct {
-	w      io.Writer
-	prefix []byte
-}
-
-// NewPrefixedWriter creates a new prefixed writer.
-func NewPrefixedWriter(w io.Writer, prefix string) *PrefixedWriter {
-	return &PrefixedWriter{
-		w:      w,
-		prefix: []byte(prefix),
-	}
-}
-
-// Write satisfies the io.Writer interface.
-func (w *PrefixedWriter) Write(buf []byte) (int, error) {
-	return w.w.Write(
-		append(
-			w.prefix,
-			append(
-				bytes.ReplaceAll(
-					bytes.TrimRight(buf, "\r\n"),
-					[]byte{'\n'},
-					append([]byte{'\n'}, w.prefix...),
-				),
-				'\n',
-			)...,
-		),
-	)
 }
 
 // ReadCachedFile reads a cached file from disk, returns error if the file name
