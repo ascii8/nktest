@@ -3,16 +3,16 @@ package nktest
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/websocket"
-	"golang.org/x/exp/maps"
-	"golang.org/x/exp/slices"
 )
 
 // DefaultProxyReadSize is the default websocket proxy read size.
@@ -81,7 +81,7 @@ func (p *Proxy) Run(ctx context.Context, urlstr string) (string, error) {
 	}
 	// run
 	go p.run(ctx, l, scheme, wsScheme, u)
-	return scheme + "://" + l.Addr().(*net.TCPAddr).String(), nil
+	return scheme + "://" + LocalAddr(l), nil
 }
 
 // Addr returns the listening address.
@@ -89,47 +89,71 @@ func (p *Proxy) Addr() string {
 	return p.addr
 }
 
+// InternalError handles internal errors.
+func (p Proxy) InternalError(res http.ResponseWriter, s string, v ...interface{}) {
+	s = fmt.Sprintf(s, v...)
+	p.logger.Logf(s)
+	http.Error(res, s, http.StatusInternalServerError)
+}
+
+func (p Proxy) DialError(logger io.Writer, w http.ResponseWriter, req *http.Request, res *http.Response, err error) {
+	p.logger.Logf("WS DIAL ERROR: %v", err)
+	if res == nil {
+		return
+	}
+	defer res.Body.Close()
+	p.logger.Errf("WS DIAL ERROR STATUS: %d %s", res.StatusCode, http.StatusText(res.StatusCode))
+	body, err := httputil.DumpResponse(res, true)
+	if err != nil {
+		p.InternalError(w, "WS DIAL ERROR: %v", err)
+		return
+	}
+	_, _ = logger.Write(body)
+	// read body
+	buf, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		p.InternalError(w, "WS DIAL ERROR: unable to read body: %v", err)
+		return
+	}
+	// emit
+	w.WriteHeader(res.StatusCode)
+	_, _ = w.Write(buf)
+	return
+}
+
 // Run runs the proxy.
 func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string, u *url.URL) {
+	outWriter, inWriter := p.logger.Stdout(DefaultOutPrefix), p.logger.Stdout(DefaultInPrefix)
 	mux := http.NewServeMux()
 	// proxy websockets
-	mux.HandleFunc(p.wsPath, func(res http.ResponseWriter, req *http.Request) {
+	mux.HandleFunc(p.wsPath, func(w http.ResponseWriter, req *http.Request) {
 		p.logger.Logf("WS OPEN: %s", req.RemoteAddr)
-		urlstr := wsScheme + "://" + u.Host + req.URL.Path
+		// dump request
+		buf, err := httputil.DumpRequest(req, true)
+		if err != nil {
+			p.InternalError(w, "WS ERROR: %v", err)
+			return
+		}
+		_, _ = outWriter.Write(buf)
+		// build url and request header
+		urlstr := wsScheme + "://" + u.Host + req.URL.RawPath
+		header := http.Header{}
+		if s := req.Header.Get("Authorization"); s != "" {
+			header.Set("Authorization", s)
+		}
 		// connect outgoing websocket
 		p.logger.Logf("WS DIAL: %s", urlstr)
-		out, pres, err := p.dialer.DialContext(ctx, urlstr, nil)
+		out, pres, err := p.dialer.DialContext(ctx, urlstr, header)
 		if err != nil {
-			defer pres.Body.Close()
-			s := fmt.Sprintf("could not connect to %s: %v", urlstr, err)
-			p.logger.Errf("WS DIAL ERROR: " + s)
-			buf, err := ioutil.ReadAll(pres.Body)
-			if err != nil {
-				p.logger.Errf("WS DIAL ERROR UNABLE TO READ BODY: %v", err)
-				http.Error(res, s, http.StatusInternalServerError)
-				return
-			}
-			p.logger.Errf("WS DIAL ERROR STATUS: %d %s", pres.StatusCode, http.StatusText(pres.StatusCode))
-			res.WriteHeader(pres.StatusCode)
-			keys := maps.Keys(pres.Header)
-			slices.Sort(keys)
-			for _, k := range keys {
-				p.logger.Errf("WS DIAL ERROR HEADER: %s: %s", k, strings.Join(pres.Header[k], " "))
-				res.Header()[k] = pres.Header[k]
-			}
-			p.logger.Errf("WS DIAL ERROR BODY: %s", string(buf))
-			_, _ = res.Write(buf)
+			p.DialError(inWriter, w, req, pres, err)
 			return
 		}
 		defer pres.Body.Close()
 		defer out.Close()
-		p.logger.Logf("WS CONNECTED: %s", urlstr)
-		// connect incoming websocket
-		in, err := p.upgrader.Upgrade(res, req, nil)
+		// upgrade incoming websocket
+		in, err := p.upgrader.Upgrade(w, req, nil)
 		if err != nil {
-			s := fmt.Sprintf("could not upgrade websocket %s: %v", req.RemoteAddr, err)
-			p.logger.Errf("WS UPGRADE ERROR: " + s)
-			http.Error(res, s, http.StatusInternalServerError)
+			p.InternalError(w, "WS UPGRADE ERROR: could not upgrade websocket %s: %v", req.RemoteAddr, err)
 			return
 		}
 		defer in.Close()
@@ -138,8 +162,8 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		defer close(errc)
-		go p.ws(ctx, DefaultInPrefix, in, out, errc)
-		go p.ws(ctx, DefaultOutPrefix, out, in, errc)
+		go p.ws(ctx, inWriter, in, out, errc)
+		go p.ws(ctx, outWriter, out, in, errc)
 		p.logger.Logf("WS CLOSE: %s %v", req.RemoteAddr, <-errc)
 	})
 	// proxy anything else
@@ -155,7 +179,7 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 // ws proxies in and out messages for a websocket connection, logging the
 // message to the logger with the passed prefix. Any error encountered will be
 // sent to errc.
-func (p *Proxy) ws(ctx context.Context, prefix string, in, out *websocket.Conn, errc chan error) {
+func (p *Proxy) ws(ctx context.Context, w io.Writer, in, out *websocket.Conn, errc chan error) {
 	for {
 		var typ int
 		var buf []byte
@@ -168,7 +192,7 @@ func (p *Proxy) ws(ctx context.Context, prefix string, in, out *websocket.Conn, 
 				errc <- err
 				return
 			}
-			p.logger.Logf(prefix + string(buf))
+			_, _ = w.Write(buf)
 			if err = out.WriteMessage(typ, buf); err != nil {
 				errc <- err
 				return
@@ -220,4 +244,15 @@ func WithLogf(f func(string, ...interface{})) ProxyOption {
 	return func(p *Proxy) {
 		p.logger = NewLogger(f)
 	}
+}
+
+// LocalAddr returns the local address of the listener.
+func LocalAddr(l net.Listener) string {
+	addr := l.Addr().(*net.TCPAddr)
+	ip := addr.IP.String()
+	switch ip {
+	case "", "::", "0.0.0.0":
+		ip = "127.0.0.1"
+	}
+	return ip + ":" + strconv.Itoa(addr.Port)
 }

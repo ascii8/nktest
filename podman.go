@@ -225,7 +225,7 @@ func PodmanGetAddr(ctx context.Context, h Handler, id, svc string) (string, stri
 	}
 	localIP := port[0].HostIP
 	switch localIP {
-	case "", "0.0.0.0":
+	case "", "0.0.0.0", "[::]":
 		localIP = "127.0.0.1"
 	}
 	s := svc
