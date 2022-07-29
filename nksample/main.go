@@ -154,9 +154,9 @@ func (m *Match) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.
 }
 
 func eventSessionStart(ctx context.Context, logger runtime.Logger, evt *api.Event) {
-	logger.Info("session start %v %v", ctx, evt)
+	logger.Info("session start %v %v", ctx.Value(runtime.RUNTIME_CTX_SESSION_ID), evt)
 }
 
 func eventSessionEnd(ctx context.Context, logger runtime.Logger, evt *api.Event) {
-	logger.Info("session end %v %v", ctx, evt)
+	logger.Info("session end %v %v", ctx.Value(runtime.RUNTIME_CTX_SESSION_ID), evt)
 }

@@ -1,4 +1,5 @@
 /.cache/
 node_modules
+/gotest/gotest
 *.log
 *.txt

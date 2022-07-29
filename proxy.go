@@ -136,7 +136,10 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 		}
 		_, _ = outWriter.Write(buf)
 		// build url and request header
-		urlstr := wsScheme + "://" + u.Host + req.URL.RawPath
+		urlstr := wsScheme + "://" + u.Host + p.wsPath
+		if req.URL.RawQuery != "" {
+			urlstr += "?" + req.URL.RawQuery
+		}
 		header := http.Header{}
 		if s := req.Header.Get("Authorization"); s != "" {
 			header.Set("Authorization", s)
@@ -161,7 +164,6 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 		errc := make(chan error, 1)
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		defer close(errc)
 		go p.ws(ctx, inWriter, in, out, errc)
 		go p.ws(ctx, outWriter, out, in, errc)
 		p.logger.Logf("WS CLOSE: %s %v", req.RemoteAddr, <-errc)
