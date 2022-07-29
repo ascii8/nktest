@@ -197,10 +197,11 @@ func (p *Proxy) ws(ctx context.Context, w io.Writer, in, out *websocket.Conn, er
 			}
 			s, msg := "TXT", string(buf)
 			switch typ {
+			case 1:
 			case 2:
 				s, msg = "BIN", hex.EncodeToString(buf)
 			default:
-				s = fmt.Sprintf("% 3d", typ)
+				s = fmt.Sprintf("(%d)", typ)
 			}
 			fmt.Fprintf(w, "%s: %s", s, msg)
 			if err = out.WriteMessage(typ, buf); err != nil {
