@@ -165,8 +165,8 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 		errc := make(chan error, 1)
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		go p.ws(ctx, inWriter, in, out, errc)
-		go p.ws(ctx, outWriter, out, in, errc)
+		go p.ws(ctx, outWriter, in, out, errc)
+		go p.ws(ctx, inWriter, out, in, errc)
 		p.logger.Logf("WS CLOSE: %s %v", req.RemoteAddr, <-errc)
 	})
 	// proxy anything else
@@ -200,7 +200,7 @@ func (p *Proxy) ws(ctx context.Context, w io.Writer, in, out *websocket.Conn, er
 			case 2:
 				s, msg = "BIN", hex.EncodeToString(buf)
 			default:
-				s = fmt.Sprintf("%03d", typ)
+				s = fmt.Sprintf("% 3d", typ)
 			}
 			fmt.Fprintf(w, "%s: %s", s, msg)
 			if err = out.WriteMessage(typ, buf); err != nil {
