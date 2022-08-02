@@ -11,14 +11,10 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v3
-      - name: install go
-        uses: actions/setup-go@v3
-        with:
-          go-version: 1.18.x
       - name: setup dependencies
         run: |
-          apt-get update
-          apt-get install -y libgpgme-dev libbtrfs-dev libdevmapper-dev
+          sudo apt-get update
+          sudo apt-get install -y libgpgme-dev libbtrfs-dev libdevmapper-dev
       - name: setup podman
         run: |
           curl -fsSL -o podman-linux-amd64.tar.gz https://github.com/mgoltzsche/podman-static/releases/latest/download/podman-linux-amd64.tar.gz
@@ -28,7 +24,12 @@ jobs:
           tar -xzf podman-linux-amd64.tar.gz
           sudo cp -r podman-linux-amd64/usr podman-linux-amd64/etc /
           /usr/local/bin/podman version
+          echo $PODMAN_HOST
           /usr/local/bin/podman system service --time=0 $PODMAN_HOST &
+      - name: install go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.18.x
       - name: test
         run: |
           go test -v
