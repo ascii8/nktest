@@ -966,6 +966,9 @@ func WithGoEnvVolumes(volumes ...EnvVolumeInfo) BuildConfigOption {
 			if vol.Sub != "" {
 				v = filepath.Join(v, vol.Sub)
 			}
+			if err := os.MkdirAll(v, 0o755); err != nil {
+				return fmt.Errorf("unable to mkdir: %w", err)
+			}
 			v, err = realpath.Realpath(v)
 			if err != nil {
 				key := vol.Key
