@@ -20,8 +20,8 @@ var globalCtx context.Context
 // nkTest is the nakama test runner.
 var nkTest *Runner
 
-// TestMain handles setting up and tearing down the postgres and nakama docker
-// images.
+// TestMain handles setting up and tearing down the postgres and nakama
+// containers.
 func TestMain(m *testing.M) {
 	var cancel func()
 	globalCtx, cancel = context.WithCancel(context.Background())
@@ -63,7 +63,7 @@ func TestHealthcheck(t *testing.T) {
 	}
 	urlstr += "/healthcheck"
 	t.Logf("url: %s", urlstr)
-	req, err := http.NewRequest("GET", urlstr, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", urlstr, nil)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -84,6 +84,8 @@ func TestHealthcheck(t *testing.T) {
 }
 
 func TestGoEchoSample(t *testing.T) {
+	ctx, cancel := context.WithCancel(globalCtx)
+	defer cancel()
 	msg := map[string]interface{}{
 		"test": "msg",
 	}
@@ -94,7 +96,7 @@ func TestGoEchoSample(t *testing.T) {
 	}
 	urlstr := nkTest.HttpLocal() + "/v2/rpc/go_echo_sample?unwrap=true&http_key=" + nkTest.Name()
 	t.Logf("url: %s", urlstr)
-	req, err := http.NewRequest("POST", urlstr, strings.NewReader(strings.TrimSpace(buf.String())))
+	req, err := http.NewRequestWithContext(ctx, "POST", urlstr, strings.NewReader(strings.TrimSpace(buf.String())))
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -136,12 +138,15 @@ func TestKeep(t *testing.T) {
 	ctx, cancel := context.WithCancel(globalCtx)
 	defer cancel()
 	local := nkTest.HttpLocal()
-	urlstr, err := NewProxy(WithLogger(NewLogger(t.Logf))).Run(ctx, local)
+	urlstr, err := NewProxy(WithLogf(t.Logf)).Run(ctx, local)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 	t.Logf("grpc: %s", nkTest.GrpcLocal())
 	t.Logf("http: %s", nkTest.HttpLocal())
+	t.Logf("console: %s", nkTest.ConsoleLocal())
+	t.Logf("http_key: %s", nkTest.HttpKey())
+	t.Logf("server_key: %s", nkTest.ServerKey())
 	t.Logf("proxy: %s", urlstr)
 	select {
 	case <-time.After(d):

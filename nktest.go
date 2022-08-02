@@ -1,4 +1,9 @@
-// Package nktest provides a nakama test runner.
+// Package nktest provides a Nakama test runner that makes it easy to build and
+// test Nakama module plugins with complex or advanced game logic using nothing
+// but "go test".
+//
+// See also github.com/ascii8/nakama-go package for a web/realtime Nakama Go
+// client.
 package nktest
 
 import (
@@ -104,6 +109,10 @@ type Runner struct {
 	httpLocal string
 	// httpRemote is the remote http address.
 	httpRemote string
+	// consoleLocal is the local console address.
+	consoleLocal string
+	// consoleRemote is the remote console address.
+	consoleRemote string
 }
 
 // New creates a new nakama test runner.
@@ -477,9 +486,11 @@ func (t *Runner) RunNakama(ctx, conn context.Context) error {
 	); err != nil {
 		return fmt.Errorf("unable to run %s: %w", t.nakamaImageId, err)
 	}
+	// follow logs
 	if err := PodmanFollowLogs(ctx, t, t.nakamaContainerId); err != nil {
 		return fmt.Errorf("unable to follow logs for %s: %w", t.nakamaContainerId, err)
 	}
+	// wait for http to be available
 	if err := PodmanServiceWait(ctx, t, t.podId, "7350/tcp", func(local, remote string) error {
 		t.httpLocal = "http://" + local
 		t.httpRemote = "http://" + remote
@@ -500,12 +511,22 @@ func (t *Runner) RunNakama(ctx, conn context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("unable to connect to %s (http): %w", t.nakamaImageId, err)
 	}
+	// grpc ports
 	if err := PodmanServiceWait(ctx, t, t.podId, "7349/tcp", func(local, remote string) error {
 		t.grpcLocal = local
 		t.grpcRemote = remote
 		return nil
 	}); err != nil {
 		return fmt.Errorf("unable to connect to %s (grpc): %w", t.nakamaImageId, err)
+	}
+	// console ports
+	if err := PodmanServiceWait(ctx, t, t.podId, "7351/tcp", func(local, remote string) error {
+		prefix := "http://" + t.name + ":" + t.name + "_password@"
+		t.consoleLocal = prefix + local
+		t.consoleRemote = prefix + remote
+		return nil
+	}); err != nil {
+		return fmt.Errorf("unable to connect to %s (console): %w", t.nakamaImageId, err)
 	}
 	return nil
 }
@@ -612,8 +633,23 @@ func (t *Runner) GrpcRemote() string {
 	return t.grpcRemote
 }
 
+// ConsoleLocal returns the console local address.
+func (t *Runner) ConsoleLocal() string {
+	return t.consoleLocal
+}
+
+// ConsoleRemote returns the console remote address.
+func (t *Runner) ConsoleRemote() string {
+	return t.consoleRemote
+}
+
 // Name returns the name.
 func (t *Runner) Name() string {
+	return t.name
+}
+
+// HttpKey returns the http key.
+func (t *Runner) HttpKey() string {
 	return t.name
 }
 
@@ -969,8 +1005,7 @@ func WithGoEnvVolumes(volumes ...EnvVolumeInfo) BuildConfigOption {
 			if err := os.MkdirAll(v, 0o755); err != nil {
 				return fmt.Errorf("unable to mkdir: %w", err)
 			}
-			v, err = realpath.Realpath(v)
-			if err != nil {
+			if v, err = realpath.Realpath(v); err != nil {
 				key := vol.Key
 				if vol.Sub != "" {
 					key += "/" + vol.Sub

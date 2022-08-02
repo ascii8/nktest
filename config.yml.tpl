@@ -1,7 +1,7 @@
 ---
 console:
   username: {{ .name }}
-  password: {{ .name }}
+  password: {{ .name }}_password
   signing_key: {{ .name }}_signing
   max_message_size_bytes: 409600
 logger:
