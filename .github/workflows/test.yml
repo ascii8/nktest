@@ -15,6 +15,10 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version: 1.18.x
+      - name: setup dependencies
+        run: |
+          apt-get update
+          apt-get install -y libgpgme-dev libbtrfs-dev libdevmapper-dev
       - name: setup podman
         run: |
           curl -fsSL -o podman-linux-amd64.tar.gz https://github.com/mgoltzsche/podman-static/releases/latest/download/podman-linux-amd64.tar.gz
