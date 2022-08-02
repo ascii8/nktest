@@ -9,12 +9,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Run actions/checkout for this repo
-        uses: actions/checkout@v3
-        with:
-          path: checkout
-          persist-credentials: false
-      - name: run tests
+      - uses: actions/checkout@v3
+      - name: podman
         run: |
           curl -fsSL -o podman-linux-amd64.tar.gz https://github.com/mgoltzsche/podman-static/releases/latest/download/podman-linux-amd64.tar.gz
           curl -fsSL -o podman-linux-amd64.tar.gz.asc https://github.com/mgoltzsche/podman-static/releases/latest/download/podman-linux-amd64.tar.gz.asc
@@ -24,4 +20,9 @@ jobs:
           sudo cp -r podman-linux-amd64/usr podman-linux-amd64/etc /
           /usr/local/bin/podman version
           /usr/local/bin/podman system service --time=0 $PODMAN_HOST &
+      - name: test
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.18.x
+        run: |
           go test -v
