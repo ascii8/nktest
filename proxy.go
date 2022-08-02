@@ -119,7 +119,6 @@ func (p Proxy) DialError(logger io.Writer, w http.ResponseWriter, req *http.Requ
 	// emit
 	w.WriteHeader(res.StatusCode)
 	_, _ = w.Write(buf)
-	return
 }
 
 // Run runs the proxy.

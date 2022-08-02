@@ -35,6 +35,7 @@ type Handler interface {
 	DockerTokenURL() string
 	AlwaysPull() bool
 	PodId() string
+	HostPortMap(string, string, uint16, uint16) uint16
 	Stdout(string) io.Writer
 	Stderr(string) io.Writer
 	Logf(string, ...interface{})
@@ -44,7 +45,9 @@ type Handler interface {
 	NetworkRemoveDelay() time.Duration
 }
 
-// PodmanContext creates a podman client.
+// PodmanContext creates a podman client. If no client exists in the current
+// context, then a new context is created and merged with the parent context,
+// otherwise ctx is passed through unchanged.
 func PodmanContext(ctx context.Context) (context.Context, context.Context, error) {
 	// no podman client was passed with the context
 	if _, err := pbindings.GetClient(ctx); err != nil {
@@ -91,10 +94,11 @@ func PodmanCreatePod(ctx, conn context.Context, h Handler, ids ...string) (strin
 			return "", fmt.Errorf("unable to inspect image %s: %w", id, err)
 		}
 		for k := range img.Config.ExposedPorts {
-			port, err := NewPortMapping(k)
+			port, err := ParsePortMapping(k)
 			if err != nil {
 				return "", fmt.Errorf("image %s has invalid service definition %q: %w", id, k, err)
 			}
+			port.HostPort = h.HostPortMap(id, k, port.ContainerPort, port.HostPort)
 			portMappings = append(portMappings, port)
 		}
 	}
@@ -273,8 +277,8 @@ func ShortId(id string) string {
 	return id[:16]
 }
 
-// NewPortMapping creates a port mapping from s.
-func NewPortMapping(s string) (pntypes.PortMapping, error) {
+// ParsePortMapping creates a port mapping from s.
+func ParsePortMapping(s string) (pntypes.PortMapping, error) {
 	var proto string
 	if i := strings.LastIndex(s, "/"); i != -1 {
 		proto, s = s[i+1:], s[:i]

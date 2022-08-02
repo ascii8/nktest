@@ -38,6 +38,8 @@ type Runner struct {
 	httpClient *http.Client
 	// alwaysPull forces pulling images.
 	alwaysPull bool
+	// portMap is the port map.
+	portMap map[string]uint16
 
 	// buildConfigs are the module build configs.
 	buildConfigs []BuildConfig
@@ -107,6 +109,7 @@ type Runner struct {
 // New creates a new nakama test runner.
 func New(opts ...Option) *Runner {
 	t := &Runner{
+		portMap:               make(map[string]uint16),
 		dockerRegistryURL:     "https://registry-1.docker.io",
 		dockerTokenURL:        "https://auth.docker.io/token",
 		dockerAuthName:        "registry.docker.io",
@@ -547,6 +550,23 @@ func (t *Runner) PodId() string {
 	return t.podId
 }
 
+// HostPortMap returns the host port for the provided container id and service.
+func (t *Runner) HostPortMap(id, svc string, containerPort, hostPort uint16) uint16 {
+	ids := []string{id}
+	if i := strings.LastIndex(id, ":"); i != -1 {
+		ids = append(ids, id[:i])
+	}
+	for _, s := range ids {
+		if p, ok := t.portMap[s+":"+svc]; ok {
+			return p
+		}
+	}
+	if p, ok := t.portMap[svc]; ok {
+		return p
+	}
+	return hostPort
+}
+
 // Stdout returns a prefixed writer for output.
 func (t *Runner) Stdout(prefix string) io.Writer {
 	return NewPrefixedWriter(t.stdout, prefix)
@@ -691,6 +711,29 @@ func WithHttpClient(httpClient *http.Client) Option {
 func WithAlwaysPull(alwaysPull bool) Option {
 	return func(t *Runner) {
 		t.alwaysPull = alwaysPull
+	}
+}
+
+// WithPortMap is a nakama test runner option to add a host port mapping for a
+// service.
+func WithPortMap(id, svc string, port uint16) Option {
+	return func(t *Runner) {
+		if id != "" {
+			t.portMap[QualifiedId(id)+":"+svc] = port
+		} else {
+			t.portMap[svc] = port
+		}
+	}
+}
+
+// WithHostPortMap is a nakama test runner option to add host port mapping for
+// the postgres and nakama services (5432/tcp, 7349/tcp, 7350/tcp, 7351/tcp).
+func WithHostPortMap() Option {
+	return func(t *Runner) {
+		WithPortMap("postgres", "5432/tcp", 5432)(t)
+		WithPortMap("heroiclabs/nakama", "7349/tcp", 7349)(t)
+		WithPortMap("heroiclabs/nakama", "7350/tcp", 7350)(t)
+		WithPortMap("heroiclabs/nakama", "7351/tcp", 7351)(t)
 	}
 }
 

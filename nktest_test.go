@@ -40,6 +40,7 @@ func TestMain(m *testing.M) {
 	pull := os.Getenv("PULL")
 	nkTest = New(
 		WithAlwaysPull(pull != "" && pull != "false" && pull != "0"),
+		WithHostPortMap(),
 		WithBuildConfig("./nksample", WithDefaultGoEnv(), WithDefaultGoVolumes()),
 	)
 	if err := nkTest.Run(globalCtx); err == nil {
