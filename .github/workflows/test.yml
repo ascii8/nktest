@@ -4,8 +4,8 @@ on:
     branch:
       - master
 jobs:
-  systemd_podman_echo_server_demo:
-    runs-on: ubuntu-22.04
+  test:
+    runs-on: macos-12
     permissions:
       contents: read
     steps:
@@ -14,9 +14,10 @@ jobs:
         with:
           path: checkout
           persist-credentials: false
-      - name: Run an echo server with podman in a user systemd service
+      - name: run tests
         run: |
-          podman pull ghcr.io/eriksjolund/socket-activate-echo:latest
-          mkdir -p ~/.config/systemd/user
+          brew update && brew install podman
+          podman machine init
+          podman machine start
+          podman info
           podman version
-          go env
