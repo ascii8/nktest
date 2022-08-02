@@ -1,0 +1,34 @@
+name: Test
+on:
+  push:
+    branch:
+      - master
+jobs:
+  systemd_podman_echo_server_demo:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Run actions/checkout for this repo
+        uses: actions/checkout@v3
+        with:
+          path: checkout
+          persist-credentials: false
+      - name: Run an echo server with podman in a user systemd service
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y socat
+          podman pull ghcr.io/eriksjolund/socket-activate-echo:latest
+          mkdir -p ~/.config/systemd/user
+          podman create --rm --name echo --network none ghcr.io/eriksjolund/socket-activate-echo
+          podman generate systemd --name --new echo > ~/.config/systemd/user/echo.service
+          cp checkout/echo.socket ~/.config/systemd/user/
+          systemctl --user daemon-reload
+          systemctl --user start echo.socket
+          echo hello | socat - tcp4:127.0.0.1:3000
+          echo hello | socat - tcp6:[::1]:3000
+          echo hello | socat - udp4:127.0.0.1:3000
+          echo hello | socat - udp6:[::1]:3000
+          echo hello | socat - unix:$HOME/echo_stream_sock
+          echo hello | socat - VSOCK-CONNECT:1:3000
+          go env
