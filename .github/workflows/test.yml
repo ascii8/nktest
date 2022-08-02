@@ -23,3 +23,5 @@ jobs:
           tar -xzf podman-linux-amd64.tar.gz
           sudo cp -r podman-linux-amd64/usr podman-linux-amd64/etc /
           /usr/local/bin/podman version
+          /usr/local/bin/podman system service --time=0 $PODMAN_HOST &
+          go test -v

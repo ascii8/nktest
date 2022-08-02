@@ -56,7 +56,11 @@ func PodmanContext(ctx context.Context) (context.Context, context.Context, error
 		if dir == "" {
 			dir = "/var/run"
 		}
-		conn, err := pbindings.NewConnection(context.Background(), "unix:"+dir+"/podman/podman.sock")
+		socket := "unix:" + dir + "/podman/podman.sock"
+		if s := os.Getenv("PODMAN_HOST"); s != "" {
+			socket = s
+		}
+		conn, err := pbindings.NewConnection(context.Background(), socket)
 		if err != nil {
 			return nil, nil, err
 		}
