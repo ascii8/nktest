@@ -494,7 +494,7 @@ func (t *Runner) RunNakama(ctx, conn context.Context) error {
 	if err := PodmanServiceWait(ctx, t, t.podId, "7350/tcp", func(local, remote string) error {
 		t.httpLocal = "http://" + local
 		t.httpRemote = "http://" + remote
-		req, err := http.NewRequestWithContext(ctx, "GET", t.httpLocal, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", t.httpLocal+"/healthcheck", nil)
 		if err != nil {
 			return err
 		}
