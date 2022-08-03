@@ -1,11 +1,15 @@
 package nktest
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -45,27 +49,38 @@ type Handler interface {
 	NetworkRemoveDelay() time.Duration
 }
 
-// PodmanContext creates a podman client. If no client exists in the current
+// PodmanOpen opens a podman context. If no client exists in the current
 // context, then a new context is created and merged with the parent context,
 // otherwise ctx is passed through unchanged.
-func PodmanContext(ctx context.Context) (context.Context, context.Context, error) {
+func PodmanOpen(ctx context.Context, h Handler) (context.Context, context.Context, error) {
 	// no podman client was passed with the context
 	if _, err := pbindings.GetClient(ctx); err != nil {
-		// TODO: check this works on windows + macos properly
-		dir := os.Getenv("XDG_RUNTIME_DIR")
-		if dir == "" {
-			dir = "/var/run"
-		}
-		socket := "unix:" + dir + "/podman/podman.sock"
-		if s := os.Getenv("PODMAN_HOST"); s != "" {
-			socket = s
-		}
-		conn, err := pbindings.NewConnection(context.Background(), socket)
+		infos, err := BuildPodmanConnInfo(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-		ctx, _ := onecontext.Merge(ctx, conn)
-		return ctx, conn, nil
+		var firstErr error
+		for _, info := range infos {
+			var conn context.Context
+			var err error
+			if info.Identity == "" {
+				conn, err = pbindings.NewConnection(context.Background(), info.URI)
+			} else {
+				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), info.URI, info.Identity)
+			}
+			if err == nil {
+				if info.Identity != "" {
+					h.Logf("PODMAN: %s IDENTITY: %s", info.URI, info.Identity)
+				} else {
+					h.Logf("PODMAN: %s", info.URI)
+				}
+				ctx, _ := onecontext.Merge(ctx, conn)
+				return ctx, conn, nil
+			} else if firstErr == nil {
+				firstErr = err
+			}
+		}
+		return nil, nil, fmt.Errorf("unable to open podman connection: %w", firstErr)
 	}
 	return ctx, ctx, nil
 }
@@ -295,4 +310,61 @@ func ParsePortMapping(s string) (pntypes.PortMapping, error) {
 		ContainerPort: uint16(port),
 		Protocol:      proto,
 	}, nil
+}
+
+// BuildPodmanConnInfo builds a list of potential podman connection info.
+func BuildPodmanConnInfo(ctx context.Context) ([]PodmanConnInfo, error) {
+	var infos []PodmanConnInfo
+	if uri := os.Getenv("PODMAN_HOST"); uri != "" {
+		infos = append(infos, PodmanConnInfo{URI: uri})
+	}
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		infos = append(infos, PodmanConnInfo{URI: "unix:" + dir + "/podman/podman.sock"})
+	}
+	if connInfos, err := PodmanSystemConnectionList(ctx); err == nil && len(connInfos) != 0 {
+		infos = append(infos, connInfos...)
+	}
+	infos = append(infos, PodmanConnInfo{URI: "/var/run/podman/podman.sock"})
+	if uri := os.Getenv("DOCKER_HOST"); uri != "" {
+		infos = append(infos, PodmanConnInfo{URI: uri})
+	}
+	return infos, nil
+}
+
+// PodmanSystemConnectionList executes podman system connection list to
+// retrieve the remote socket list.
+func PodmanSystemConnectionList(ctx context.Context) ([]PodmanConnInfo, error) {
+	cmdPath, err := exec.LookPath("podman")
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, cmdPath, "system", "connection", "list", "--format=json")
+	buf, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(buf))
+	dec.DisallowUnknownFields()
+	var infos []PodmanConnInfo
+	if err := dec.Decode(&infos); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(infos, func(i, j int) bool {
+		switch {
+		case infos[i].Default:
+			return true
+		case infos[j].Default:
+			return false
+		}
+		return i < j
+	})
+	return infos, nil
+}
+
+// PodmanConnInfo holds information about a podman connection.
+type PodmanConnInfo struct {
+	Name     string `json:"Name"`
+	URI      string `json:"URI"`
+	Identity string `json:"Identity"`
+	Default  bool   `json:"Default"`
 }

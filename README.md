@@ -172,3 +172,24 @@ was not possible to mount the user's Go build/mod cache directories without
 stomping on the local UID/GID and subsequently affecting the read/write
 permissions. Thus the change to Podman, which is able to run containers without
 root permissions, and can keep user UID/GID's on files.
+
+## notes
+
+macOS:
+
+```sh
+# update homebrew formulas and upgrade packages
+brew update && brew upgrade
+
+# install podman
+brew install podman
+
+# install gpgme (needed for podman's Go binding dependenices)
+brew install gpgme
+
+# if unable to do `go test -v` out of the box, re-init the podman machine
+podman machine stop podman-machine-default
+podman machine rm podman-machine-default
+podman machine init -v $HOME:$HOME
+podman machine start
+```

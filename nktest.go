@@ -171,7 +171,7 @@ func (t *Runner) Run(ctx context.Context) error {
 		return err
 	}
 	// get the podman context
-	ctx, conn, err := PodmanContext(ctx)
+	ctx, conn, err := PodmanOpen(ctx, t)
 	if err != nil {
 		return fmt.Errorf("unable to create podman client: %w", err)
 	}
