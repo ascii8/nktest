@@ -7,7 +7,7 @@ require (
 	github.com/containers/common v0.48.0
 	github.com/containers/podman/v4 v4.0.3
 	github.com/gorilla/websocket v1.5.0
-	github.com/heroiclabs/nakama-common v1.23.0
+	github.com/heroiclabs/nakama-common v1.24.0
 	github.com/lib/pq v1.10.6
 	github.com/opencontainers/runtime-spec v1.0.3-0.20211214071223-8958f93039ab
 	github.com/teivah/onecontext v1.3.0
