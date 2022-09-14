@@ -282,7 +282,9 @@ func PodmanBuildMounts(mounts ...string) ([]pspec.Mount, error) {
 // QualifiedId fully qualifies a container image id.
 func QualifiedId(id string) string {
 	switch strings.Count(id, "/") {
-	case 0, 1:
+	case 0:
+		return "docker.io/library/" + id
+	case 1:
 		return "docker.io/" + id
 	}
 	return id

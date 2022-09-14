@@ -1,8 +1,7 @@
 module github.com/ascii8/nktest/gotest
 
-go 1.18
+go 1.19
 
-require (
-	github.com/klauspost/compress v1.10.3 // indirect
-	nhooyr.io/websocket v1.8.7 // indirect
-)
+require nhooyr.io/websocket v1.8.7
+
+require github.com/klauspost/compress v1.15.9 // indirect

@@ -958,6 +958,7 @@ func WithGoEnv(env ...string) BuildConfigOption {
 // environment variables for Go.
 //
 // Copies:
+//
 //	GONOPROXY
 //	GONOSUMDB
 //	GOPRIVATE
