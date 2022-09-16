@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -117,6 +116,12 @@ type Runner struct {
 
 // New creates a new nakama test runner.
 func New(opts ...Option) *Runner {
+	var stdout, stderr io.Writer = noopWriter{}, noopWriter{}
+	for _, s := range os.Args {
+		if s == "-test.v=true" {
+			stdout, stderr = os.Stdout, os.Stderr
+		}
+	}
 	t := &Runner{
 		portMap:               make(map[string]uint16),
 		dockerRegistryURL:     "https://registry-1.docker.io",
@@ -134,8 +139,8 @@ func New(opts ...Option) *Runner {
 		containerRemoveDelay:  500 * time.Millisecond,
 		backoffMaxInterval:    2 * time.Second,
 		backoffMaxElapsedTime: 30 * time.Second,
-		stdout:                os.Stdout,
-		stderr:                os.Stderr,
+		stdout:                stdout,
+		stderr:                stderr,
 	}
 	for _, o := range opts {
 		o(t)
@@ -271,7 +276,7 @@ func (t *Runner) Init() error {
 		return fmt.Errorf("unable to execute template: %w", err)
 	}
 	// write config template
-	if err := ioutil.WriteFile(filepath.Join(t.volumeDir, "nakama", t.configFilename), buf.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(t.volumeDir, "nakama", t.configFilename), buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("unable to write %s: %w", t.configFilename, err)
 	}
 	return nil
@@ -333,7 +338,7 @@ func (t *Runner) GetNakamaVersion(ctx context.Context) error {
 		if !m[ver] {
 			continue
 		}
-		if err := ioutil.WriteFile(cacheFile, []byte(ver+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(cacheFile, []byte(ver+"\n"), 0o644); err != nil {
 			return fmt.Errorf("unable to write nakama version cache file %s: %w", cacheFile, err)
 		}
 		t.nakamaVersion = ver
@@ -1059,7 +1064,7 @@ func ReadCachedFile(name string, ttl time.Duration) ([]byte, error) {
 	case fi.ModTime().Add(ttl).Before(time.Now()):
 		return nil, fmt.Errorf("%s needs to be refreshed (past %v)", name, ttl)
 	}
-	return ioutil.ReadFile(name)
+	return os.ReadFile(name)
 }
 
 // IsSubDir determines if b is subdir of a.

@@ -164,3 +164,16 @@ func (w *PrefixedWriter) Write(buf []byte) (int, error) {
 		),
 	)
 }
+
+// noopWriter is a no op writer.
+type noopWriter struct{}
+
+// Write satisfies the io.Writer interface.
+func (noopWriter) Write(buf []byte) (int, error) {
+	return len(buf), nil
+}
+
+// NewNoopWriter creates a no op writer.
+func NewNoopWriter() io.Writer {
+	return noopWriter{}
+}

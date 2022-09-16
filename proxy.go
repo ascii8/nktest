@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -111,7 +110,7 @@ func (p Proxy) DialError(logger io.Writer, w http.ResponseWriter, req *http.Requ
 	}
 	_, _ = logger.Write(body)
 	// read body
-	buf, err := ioutil.ReadAll(res.Body)
+	buf, err := io.ReadAll(res.Body)
 	if err != nil {
 		p.InternalError(w, "WS DIAL ERROR: unable to read body: %v", err)
 		return

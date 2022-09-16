@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -35,7 +35,7 @@ func Example() {
 		log.Fatalf("status %d != 200", res.StatusCode)
 	}
 	// read response
-	buf, err := ioutil.ReadAll(res.Body)
+	buf, err := io.ReadAll(res.Body)
 	if err != nil {
 		log.Fatal(err)
 	}
