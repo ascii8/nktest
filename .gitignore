@@ -1,4 +1,4 @@
-/.cache/
+/testdata/.cache/
 node_modules
 /gotest/gotest
 *.log

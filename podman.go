@@ -323,8 +323,8 @@ func BuildPodmanConnInfo(ctx context.Context) ([]PodmanConnInfo, error) {
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
 		infos = append(infos, PodmanConnInfo{URI: "unix:" + dir + "/podman/podman.sock"})
 	}
-	if connInfos, err := PodmanSystemConnectionList(ctx); err == nil && len(connInfos) != 0 {
-		infos = append(infos, connInfos...)
+	if v, err := PodmanSystemConnectionList(ctx); err == nil && len(v) != 0 {
+		infos = append(infos, v...)
 	}
 	infos = append(infos, PodmanConnInfo{URI: "/var/run/podman/podman.sock"})
 	if uri := os.Getenv("DOCKER_HOST"); uri != "" {

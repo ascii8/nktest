@@ -28,8 +28,6 @@ jobs:
           /usr/local/bin/podman system service --time=0 $PODMAN_HOST &
       - name: install go
         uses: actions/setup-go@v3
-        with:
-          go-version: 1.18.x
       - name: test
         run: |
           go test -v
