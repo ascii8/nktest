@@ -44,64 +44,30 @@ import "github.com/ascii8/nktest"
 // TestMain handles setting up and tearing down the postgres and nakama
 // containers.
 func TestMain(m *testing.M) {
-	// create a global context that can be used from within Test* funcs
-	var cancel func()
-	globalCtx, cancel = context.WithCancel(context.Background())
-	go func() {
-		// catch signals, canceling context to cause cleanup
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-		select {
-		case <-globalCtx.Done():
-		case sig := <-ch:
-			fmt.Fprintf(os.Stdout, "SIGNAL: %s\n", sig)
-			cancel()
-		}
-	}()
-	code := 0
-	pull := os.Getenv("PULL")
-	myTestRunner = nktest.New(
-		// force pull when environment variable is set
-		nktest.WithAlwaysPull(pull != "" && pull != "false" && pull != "0"),
-		// use host port mapping (makes the Nakama server available on default
-		// ports, for use with Example* test funcs
-		nktest.WithHostPortMap(),
-		// add a build config for the nksample subdirectory with Go's environment
-		// variables passed to the nakama server container, and mounting the user's
-		// Go build and mod cache's as volumes on the container (drastically speeds
-		// up build times)
+	ctx := context.Background()
+	ctx = nktest.WithAlwaysPullFromEnv(ctx, "PULL")
+	ctx = nktest.WithHostPortMap(ctx)
+	nktest.Main(ctx, m,
+		nktest.WithDir("./testdata"),
 		nktest.WithBuildConfig("./nksample", nktest.WithDefaultGoEnv(), nktest.WithDefaultGoVolumes()),
 	)
-	// run the test runner -- see https://pkg.go.dev/testing#hdr-Main
-	if err := myTestRunner.Run(globalCtx); err == nil {
-		code = m.Run()
-	} else {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		code = 1
-	}
-	cancel()
-	// brief pause to allow all the containers and related resources to be stopped/removed
-	<-time.After(2200 * time.Millisecond)
-	os.Exit(code)
 }
 ```
 
 Then, from within a `Test*` func:
 
 ```go
-func TestNakama(t *testing.T) {
-	// create local context
-	ctx, cancel := context.WithCancel(globalCtx)
+import "github.com/ascii8/nktest"
+
+func TestNakamaHealthcheck(t *testing.T) {
+	ctx, cancel, nk := nktest.WithCancel(context.Background(), t)
 	defer cancel()
-	// create a logging proxy
-	urlstr, err := myTestRunner.RunProxy(ctx, nktest.WithLogf(t.Logf))
+	urlstr, err := nktest.RunProxy(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	// create the request
-	urlstr += "/healthcheck"
-	t.Logf("url: %s", urlstr)
-	req, err := http.NewRequestWithContext(ctx, "GET", urlstr, nil)
+	t.Logf("proxy: %s", urlstr)
+	req, err := http.NewRequestWithContext(ctx, "GET", urlstr+"/healthcheck", nil)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -122,14 +88,13 @@ func TestNakama(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("expected %d, got: %d", http.StatusOK, res.StatusCode)
 	}
-	t.Logf("healthcheck is %d", res.StatusCode)
+	t.Logf("healthcheck status: %d", res.StatusCode)
 	// display connection information
-	t.Logf("grpc: %s", nkTest.GrpcLocal())
-	t.Logf("http: %s", nkTest.HttpLocal())
-	t.Logf("console: %s", nkTest.ConsoleLocal())
-	t.Logf("http_key: %s", nkTest.HttpKey())
-	t.Logf("server_key: %s", nkTest.ServerKey())
-	t.Logf("proxy: %s", urlstr)
+	t.Logf("grpc: %s", nk.GrpcLocal())
+	t.Logf("http: %s", nk.HttpLocal())
+	t.Logf("console: %s", nk.ConsoleLocal())
+	t.Logf("http_key: %s", nk.HttpKey())
+	t.Logf("server_key: %s", nk.ServerKey())
 }
 ```
 
