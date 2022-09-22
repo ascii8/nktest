@@ -81,8 +81,7 @@ func WithStderr(parent context.Context, stderr io.Writer) context.Context {
 	return context.WithValue(parent, stderrKey, stderr)
 }
 
-// WithCancelDelay sets the cancel delay on the context. Used when canceling
-// the global context.
+// WithCancelDelay sets the cancel delay on the context.
 func WithCancelDelay(parent context.Context, cancelDelay time.Duration) context.Context {
 	return context.WithValue(parent, cancelDelayKey, cancelDelay)
 }

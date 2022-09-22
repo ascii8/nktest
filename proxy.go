@@ -120,7 +120,7 @@ func (p Proxy) DialError(ctx context.Context, inWriter io.Writer, w http.Respons
 
 // Run runs the proxy.
 func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string, u *url.URL) {
-	outWriter, inWriter := PrefixedWriter(Stdout(ctx), DefaultPrefixOut), PrefixedWriter(Stdout(ctx), DefaultPrefixIn)
+	outWriter, inWriter := PrefixedWriter(Stdout(ctx), "[P] "+DefaultPrefixOut), PrefixedWriter(Stdout(ctx), "[P] "+DefaultPrefixIn)
 	mux := http.NewServeMux()
 	// proxy websockets
 	mux.HandleFunc(p.wsPath, func(w http.ResponseWriter, req *http.Request) {
