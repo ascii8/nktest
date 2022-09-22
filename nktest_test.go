@@ -4,61 +4,29 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
 
-// globalCtx is the global context.
-var globalCtx context.Context
-
-// nkTest is the nakama test runner.
-var nkTest *Runner
-
 // TestMain handles setting up and tearing down the postgres and nakama
 // containers.
 func TestMain(m *testing.M) {
-	var cancel func()
-	globalCtx, cancel = context.WithCancel(context.Background())
-	go func() {
-		// catch signals, canceling context to cause cleanup
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-		select {
-		case <-globalCtx.Done():
-		case sig := <-ch:
-			fmt.Fprintf(os.Stdout, "SIGNAL: %s\n", sig)
-			cancel()
-		}
-	}()
-	code := 0
-	pull := os.Getenv("PULL")
-	nkTest = New(
+	ctx := context.Background()
+	ctx = WithAlwaysPullFromEnv(ctx, "PULL")
+	ctx = WithHostPortMap(ctx)
+	Main(ctx, m,
 		WithDir("./testdata"),
-		WithAlwaysPull(pull != "" && pull != "false" && pull != "0"),
-		WithHostPortMap(),
 		WithBuildConfig("./nksample", WithDefaultGoEnv(), WithDefaultGoVolumes()),
 	)
-	if err := nkTest.Run(globalCtx); err == nil {
-		code = m.Run()
-	} else {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		code = 1
-	}
-	cancel()
-	<-time.After(2200 * time.Millisecond)
-	os.Exit(code)
 }
 
 func TestHealthcheck(t *testing.T) {
-	ctx, cancel := context.WithCancel(globalCtx)
+	ctx, cancel, nk := WithCancel(context.Background(), t)
 	defer cancel()
-	urlstr, err := nkTest.RunProxy(ctx, WithLogf(t.Logf))
+	urlstr, err := nk.RunProxy(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -85,7 +53,7 @@ func TestHealthcheck(t *testing.T) {
 }
 
 func TestGoEchoSample(t *testing.T) {
-	ctx, cancel := context.WithCancel(globalCtx)
+	ctx, cancel, nk := WithCancel(context.Background(), t)
 	defer cancel()
 	msg := map[string]interface{}{
 		"test": "msg",
@@ -95,7 +63,7 @@ func TestGoEchoSample(t *testing.T) {
 	if err := enc.Encode(msg); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	urlstr := nkTest.HttpLocal() + "/v2/rpc/go_echo_sample?unwrap=true&http_key=" + nkTest.Name()
+	urlstr := nk.HttpLocal() + "/v2/rpc/go_echo_sample?unwrap=true&http_key=" + nk.Name()
 	t.Logf("url: %s", urlstr)
 	req, err := http.NewRequestWithContext(ctx, "POST", urlstr, strings.NewReader(strings.TrimSpace(buf.String())))
 	if err != nil {
@@ -104,7 +72,7 @@ func TestGoEchoSample(t *testing.T) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	cl := &http.Client{
-		Transport: NewLogger(t.Logf).Transport(nil),
+		Transport: Transport(ctx, nil),
 	}
 	res, err := cl.Do(req)
 	if err != nil {
@@ -136,21 +104,21 @@ func TestKeep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	ctx, cancel := context.WithCancel(globalCtx)
+	ctx, cancel, nk := WithCancel(context.Background(), t)
 	defer cancel()
-	local := nkTest.HttpLocal()
-	urlstr, err := NewProxy(WithLogf(t.Logf)).Run(ctx, local)
+	urlstr, err := nk.RunProxy(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	t.Logf("grpc: %s", nkTest.GrpcLocal())
-	t.Logf("http: %s", nkTest.HttpLocal())
-	t.Logf("console: %s", nkTest.ConsoleLocal())
-	t.Logf("http_key: %s", nkTest.HttpKey())
-	t.Logf("server_key: %s", nkTest.ServerKey())
+	t.Logf("local: %s", nk.HttpLocal())
+	t.Logf("grpc: %s", nk.GrpcLocal())
+	t.Logf("http: %s", nk.HttpLocal())
+	t.Logf("console: %s", nk.ConsoleLocal())
+	t.Logf("http_key: %s", nk.HttpKey())
+	t.Logf("server_key: %s", nk.ServerKey())
 	t.Logf("proxy: %s", urlstr)
 	select {
 	case <-time.After(d):
-	case <-globalCtx.Done():
+	case <-ctx.Done():
 	}
 }

@@ -6,20 +6,29 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
-// GetImageTags gets the docker registry tags for a image id.
-func GetImageTags(ctx context.Context, h Handler, id string) ([]string, error) {
-	tok, err := GenDockerToken(ctx, h, id)
+// DockerImageTags gets the docker registry tags for a image id.
+func DockerImageTags(ctx context.Context, id string) ([]string, error) {
+	tok, err := DockerToken(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", h.DockerRegistryURL()+"/v2/"+id+"/tags/list", nil)
+	switch {
+	case !strings.HasPrefix(id, "docker.io/"):
+		return nil, fmt.Errorf("%s is not fully qualified", id)
+	case strings.HasPrefix(id, "docker.io/library/"):
+		id = strings.TrimPrefix(id, "docker.io/library/")
+	default:
+		id = strings.TrimPrefix(id, "docker.io/")
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", DockerRegistryURL(ctx)+"/v2/"+id+"/tags/list", nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Add("Authorization", "Bearer "+tok)
-	res, err := h.HttpClient().Do(req)
+	res, err := HttpClient(ctx).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -39,17 +48,25 @@ func GetImageTags(ctx context.Context, h Handler, id string) ([]string, error) {
 	return v.Tags, nil
 }
 
-// GenDockerToken generates a docker auth token for the repo id.
-func GenDockerToken(ctx context.Context, h Handler, id string) (string, error) {
-	q := url.Values{
-		"service": []string{h.DockerAuthName()},
-		"scope":   []string{h.DockerAuthScope(id)},
+// DockerToken generates a docker auth token for the repo id.
+func DockerToken(ctx context.Context, id string) (string, error) {
+	switch {
+	case !strings.HasPrefix(id, "docker.io/"):
+		return "", fmt.Errorf("%s is not fully qualified", id)
+	case strings.HasPrefix(id, "docker.io/library/"):
+		id = strings.TrimPrefix(id, "docker.io/library/")
+	default:
+		id = strings.TrimPrefix(id, "docker.io/")
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", h.DockerTokenURL()+"?"+q.Encode(), nil)
+	q := url.Values{
+		"service": []string{DockerAuthName(ctx)},
+		"scope":   []string{DockerAuthScope(ctx, id)},
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", DockerTokenURL(ctx)+"?"+q.Encode(), nil)
 	if err != nil {
 		return "", err
 	}
-	res, err := h.HttpClient().Do(req)
+	res, err := HttpClient(ctx).Do(req)
 	if err != nil {
 		return "", err
 	}

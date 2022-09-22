@@ -27,7 +27,6 @@ type Proxy struct {
 	wsPath   string
 	upgrader *websocket.Upgrader
 	dialer   *websocket.Dialer
-	logger   Logger
 }
 
 // NewProxy creates a new http and websocket logging proxy.
@@ -35,7 +34,6 @@ func NewProxy(opts ...ProxyOption) *Proxy {
 	p := &Proxy{
 		addr:   ":0",
 		wsPath: "/ws",
-		logger: NewLogger(nil),
 	}
 	for _, o := range opts {
 		o(p)
@@ -90,29 +88,29 @@ func (p *Proxy) Addr() string {
 }
 
 // InternalError handles internal errors.
-func (p Proxy) InternalError(res http.ResponseWriter, s string, v ...interface{}) {
+func (p Proxy) InternalError(ctx context.Context, res http.ResponseWriter, s string, v ...interface{}) {
 	s = fmt.Sprintf(s, v...)
-	p.logger.Logf(s)
+	Logf(ctx, s)
 	http.Error(res, s, http.StatusInternalServerError)
 }
 
-func (p Proxy) DialError(logger io.Writer, w http.ResponseWriter, req *http.Request, res *http.Response, err error) {
-	p.logger.Logf("WS DIAL ERROR: %v", err)
+func (p Proxy) DialError(ctx context.Context, inWriter io.Writer, w http.ResponseWriter, req *http.Request, res *http.Response, err error) {
+	Logf(ctx, "% 16s: %v", "WS DIAL ERROR", err)
 	if res == nil {
 		return
 	}
 	defer res.Body.Close()
-	p.logger.Errf("WS DIAL ERROR STATUS: %d %s", res.StatusCode, http.StatusText(res.StatusCode))
+	Errf(ctx, "% 16s: %d %s", "WS DIAL ERROR STATUS", res.StatusCode, http.StatusText(res.StatusCode))
 	body, err := httputil.DumpResponse(res, true)
 	if err != nil {
-		p.InternalError(w, "WS DIAL ERROR: %v", err)
+		p.InternalError(ctx, w, "WS DIAL ERROR: %v", err)
 		return
 	}
-	_, _ = logger.Write(body)
+	_, _ = inWriter.Write(body)
 	// read body
 	buf, err := io.ReadAll(res.Body)
 	if err != nil {
-		p.InternalError(w, "WS DIAL ERROR: unable to read body: %v", err)
+		p.InternalError(ctx, w, "WS DIAL ERROR: unable to read body: %v", err)
 		return
 	}
 	// emit
@@ -122,15 +120,15 @@ func (p Proxy) DialError(logger io.Writer, w http.ResponseWriter, req *http.Requ
 
 // Run runs the proxy.
 func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string, u *url.URL) {
-	outWriter, inWriter := p.logger.Stdout(DefaultOutPrefix), p.logger.Stdout(DefaultInPrefix)
+	outWriter, inWriter := PrefixedWriter(Stdout(ctx), DefaultPrefixOut), PrefixedWriter(Stdout(ctx), DefaultPrefixIn)
 	mux := http.NewServeMux()
 	// proxy websockets
 	mux.HandleFunc(p.wsPath, func(w http.ResponseWriter, req *http.Request) {
-		p.logger.Logf("WS OPEN: %s", req.RemoteAddr)
+		Logf(ctx, "% 16s: %s", "WS OPEN", req.RemoteAddr)
 		// dump request
 		buf, err := httputil.DumpRequest(req, true)
 		if err != nil {
-			p.InternalError(w, "WS ERROR: %v", err)
+			p.InternalError(ctx, w, "WS ERROR: %v", err)
 			return
 		}
 		_, _ = outWriter.Write(buf)
@@ -144,10 +142,10 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 			header.Set("Authorization", s)
 		}
 		// connect outgoing websocket
-		p.logger.Logf("WS DIAL: %s", urlstr)
+		Logf(ctx, "% 16s: %s", "WS DIAL", urlstr)
 		out, pres, err := p.dialer.DialContext(ctx, urlstr, header)
 		if err != nil {
-			p.DialError(inWriter, w, req, pres, err)
+			p.DialError(ctx, inWriter, w, req, pres, err)
 			return
 		}
 		defer pres.Body.Close()
@@ -155,24 +153,24 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 		// upgrade incoming websocket
 		in, err := p.upgrader.Upgrade(w, req, nil)
 		if err != nil {
-			p.InternalError(w, "WS UPGRADE ERROR: could not upgrade websocket %s: %v", req.RemoteAddr, err)
+			p.InternalError(ctx, w, "WS UPGRADE ERROR: could not upgrade websocket %s: %v", req.RemoteAddr, err)
 			return
 		}
 		defer in.Close()
-		p.logger.Logf("WS UPGRADED: %s", req.RemoteAddr)
+		Logf(ctx, "% 16s: %s", "WS UPGRADED", req.RemoteAddr)
 		errc := make(chan error, 1)
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		go p.ws(ctx, outWriter, in, out, errc)
 		go p.ws(ctx, inWriter, out, in, errc)
-		p.logger.Logf("WS CLOSE: %s %v", req.RemoteAddr, <-errc)
+		Logf(ctx, "% 16s: %s %v", "WS CLOSE", req.RemoteAddr, <-errc)
 	})
 	// proxy anything else
 	prox := httputil.NewSingleHostReverseProxy(&url.URL{
 		Scheme: scheme,
 		Host:   u.Host,
 	})
-	prox.Transport = p.logger.Transport(nil)
+	prox.Transport = NewRoundTripper(outWriter, inWriter, prox.Transport)
 	mux.Handle("/", prox)
 	_ = http.Serve(l, mux)
 }
@@ -238,20 +236,6 @@ func WithUpgrader(upgrader websocket.Upgrader) ProxyOption {
 func WithDialer(dialer websocket.Dialer) ProxyOption {
 	return func(p *Proxy) {
 		p.dialer = &dialer
-	}
-}
-
-// WithLogger is a proxy option to set logger.
-func WithLogger(logger Logger) ProxyOption {
-	return func(p *Proxy) {
-		p.logger = logger
-	}
-}
-
-// WithLogf is a proxy option to set a wrapped logger. Useful with *testing.T.
-func WithLogf(f func(string, ...interface{})) ProxyOption {
-	return func(p *Proxy) {
-		p.logger = NewLogger(f)
 	}
 }
 

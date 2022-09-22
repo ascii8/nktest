@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"sort"
@@ -25,39 +23,18 @@ import (
 	pspecgen "github.com/containers/podman/v4/pkg/specgen"
 	pspec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/teivah/onecontext"
-
 	"github.com/yookoala/realpath"
 )
-
-// Handler is a handler.
-type Handler interface {
-	Name() string
-	HttpClient() *http.Client
-	DockerAuthName() string
-	DockerAuthScope(string) string
-	DockerRegistryURL() string
-	DockerTokenURL() string
-	AlwaysPull() bool
-	PodId() string
-	HostPortMap(string, string, uint16, uint16) uint16
-	Stdout(string) io.Writer
-	Stderr(string) io.Writer
-	Logf(string, ...interface{})
-	Errf(string, ...interface{})
-	Backoff(context.Context, func() error) error
-	ContainerRemoveDelay() time.Duration
-	NetworkRemoveDelay() time.Duration
-}
 
 // PodmanOpen opens a podman context. If no client exists in the current
 // context, then a new context is created and merged with the parent context,
 // otherwise ctx is passed through unchanged.
-func PodmanOpen(ctx context.Context, h Handler) (context.Context, context.Context, error) {
+func PodmanOpen(ctx context.Context) (context.Context, error) {
 	// no podman client was passed with the context
 	if _, err := pbindings.GetClient(ctx); err != nil {
 		infos, err := BuildPodmanConnInfo(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		var firstErr error
 		for _, info := range infos {
@@ -70,32 +47,32 @@ func PodmanOpen(ctx context.Context, h Handler) (context.Context, context.Contex
 			}
 			if err == nil {
 				if info.Identity != "" {
-					h.Logf("PODMAN: %s IDENTITY: %s", info.URI, info.Identity)
+					Logf(ctx, "% 16s: %s IDENTITY: %s", "PODMAN", info.URI, info.Identity)
 				} else {
-					h.Logf("PODMAN: %s", info.URI)
+					Logf(ctx, "% 16s: %s", "PODMAN", info.URI)
 				}
 				ctx, _ := onecontext.Merge(ctx, conn)
-				return ctx, conn, nil
+				return context.WithValue(ctx, podmanConnKey, conn), nil
 			} else if firstErr == nil {
 				firstErr = err
 			}
 		}
-		return nil, nil, fmt.Errorf("unable to open podman connection: %w", firstErr)
+		return nil, fmt.Errorf("unable to open podman connection: %w", firstErr)
 	}
-	return ctx, ctx, nil
+	return ctx, nil
 }
 
-// PodmanPullImages grabs image ids when not present on the host or when the
-// handler's always pull is true.
-func PodmanPullImages(ctx, conn context.Context, h Handler, ids ...string) error {
+// PodmanPullImages grabs image ids when not present on the host or when
+// AlwaysPull returns true.
+func PodmanPullImages(ctx context.Context, ids ...string) error {
 	for _, id := range ids {
 		// skip if the image exists
-		if img, err := pimages.GetImage(ctx, id, nil); err == nil && !h.AlwaysPull() {
-			h.Logf("EXISTING: %s %s", id, ShortId(img.ID))
+		if img, err := pimages.GetImage(ctx, id, nil); err == nil && !AlwaysPull(ctx) {
+			Logf(ctx, "% 16s: %s %s", "EXISTING", id, ShortId(img.ID))
 			continue
 		}
-		h.Logf("PULLING: %s", id)
-		if _, err := pimages.Pull(ctx, id, nil); err != nil {
+		Logf(ctx, "% 16s: %s", "PULLING", id)
+		if _, err := pimages.Pull(ctx, id, new(pimages.PullOptions).WithQuiet(true)); err != nil {
 			return err
 		}
 	}
@@ -103,8 +80,7 @@ func PodmanPullImages(ctx, conn context.Context, h Handler, ids ...string) error
 }
 
 // PodmanCreatePod creates a pod network.
-func PodmanCreatePod(ctx, conn context.Context, h Handler, ids ...string) (string, error) {
-	name := h.Name()
+func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string, error) {
 	// inspect containder ids and get ports to publish
 	var portMappings []pntypes.PortMapping
 	for _, id := range ids {
@@ -117,16 +93,16 @@ func PodmanCreatePod(ctx, conn context.Context, h Handler, ids ...string) (strin
 			if err != nil {
 				return "", fmt.Errorf("image %s has invalid service definition %q: %w", id, k, err)
 			}
-			port.HostPort = h.HostPortMap(id, k, port.ContainerPort, port.HostPort)
+			port.HostPort = HostPortMap(ctx, id, k, port.ContainerPort, port.HostPort)
 			portMappings = append(portMappings, port)
 		}
 	}
 	// create spec
 	var err error
 	spec := pspecgen.NewPodSpecGenerator()
-	spec.InfraName = name
+	spec.InfraName = podName
 	if spec, err = pentities.ToPodSpecGen(*spec, &pentities.PodCreateOptions{
-		Name:  name,
+		Name:  podName,
 		Infra: true,
 		Net: &pentities.NetOptions{
 			PublishPorts: portMappings,
@@ -144,26 +120,24 @@ func PodmanCreatePod(ctx, conn context.Context, h Handler, ids ...string) (strin
 	}
 	go func() {
 		<-ctx.Done()
-		<-time.After(h.NetworkRemoveDelay())
-		h.Logf("REMOVING POD: %s %s", name, ShortId(res.Id))
-		if _, err := ppods.Remove(conn, res.Id, nil); err != nil {
-			h.Errf("unable to remove pod %s %s: %v", name, ShortId(res.Id), err)
+		<-time.After(NetworkRemoveDelay(ctx))
+		Logf(ctx, "% 16s: %s %s", "REMOVING POD", podName, ShortId(res.Id))
+		if _, err := ppods.Remove(PodmanConn(ctx), res.Id, nil); err != nil {
+			Errf(ctx, "unable to remove pod %s %s: %v", podName, ShortId(res.Id), err)
 		}
 	}()
 	return res.Id, nil
 }
 
 // PodmanRun runs a container image id.
-func PodmanRun(ctx, conn context.Context, h Handler, id string, env map[string]string, mounts []string, entrypoint ...string) (string, error) {
-	h.Logf("RUN: %s", id)
+func PodmanRun(ctx context.Context, podId, id string, env map[string]string, mounts []string, entrypoint ...string) (string, error) {
+	Logf(ctx, "% 16s: %s", "RUN", id)
 	// create spec
 	s := pspecgen.NewSpecGenerator(id, false)
 	s.Remove = true
 	s.Entrypoint = entrypoint
 	s.Env = env
-	if podId := h.PodId(); podId != "" {
-		s.Pod = podId
-	}
+	s.Pod = podId
 	var err error
 	if s.Mounts, err = PodmanBuildMounts(mounts...); err != nil {
 		return "", err
@@ -173,44 +147,37 @@ func PodmanRun(ctx, conn context.Context, h Handler, id string, env map[string]s
 	if err != nil {
 		return "", fmt.Errorf("unable to create %s: %w", id, err)
 	}
-	h.Logf("CREATED: %s %s", id, ShortId(res.ID))
+	Logf(ctx, "% 16s: %s %s", "CREATED", id, ShortId(res.ID))
 	go func() {
 		<-ctx.Done()
-		h.Logf("STOPPING: %s %s", id, ShortId(res.ID))
-		opts := new(pcontainers.StopOptions).WithTimeout(uint(h.ContainerRemoveDelay().Seconds()))
-		if err := pcontainers.Stop(conn, res.ID, opts); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) {
-			h.Errf("unable to stop container %s %s: %v", id, ShortId(res.ID), err)
+		Logf(ctx, "% 16s: %s %s", "STOPPING", id, ShortId(res.ID))
+		opts := new(pcontainers.StopOptions).WithTimeout(uint(ContainerRemoveDelay(ctx).Seconds()))
+		if err := pcontainers.Stop(PodmanConn(ctx), res.ID, opts); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) {
+			Errf(ctx, "unable to stop container %s %s: %v", id, ShortId(res.ID), err)
 		}
 	}()
 	// run
 	if err := pcontainers.Start(ctx, res.ID, nil); err != nil {
 		return "", fmt.Errorf("unable to start %s %s: %w", id, ShortId(res.ID), err)
 	}
-	h.Logf("RUNNING: %s %s", id, ShortId(res.ID))
+	Logf(ctx, "% 16s: %s %s", "RUNNING", id, ShortId(res.ID))
 	return res.ID, nil
 }
 
 // PodmanFollowLogs follows the logs for a container.
-func PodmanFollowLogs(ctx context.Context, h Handler, id string) error {
+func PodmanFollowLogs(ctx context.Context, id string) error {
 	go func() {
 		shortId := ShortId(id)
-		if err := pcontainers.Attach(
-			ctx,
-			id,
-			nil,
-			h.Stdout(shortId+": "),
-			h.Stderr(shortId+": "),
-			nil,
-			&pcontainers.AttachOptions{},
-		); err != nil {
-			h.Errf("unable to get logs for %s: %v", shortId, err)
+		stdout, stderr := PrefixedWriter(Stdout(ctx), shortId+": "), PrefixedWriter(Stderr(ctx), shortId+": ")
+		if err := pcontainers.Attach(ctx, id, nil, stdout, stderr, nil, &pcontainers.AttachOptions{}); err != nil {
+			Errf(ctx, "unable to get logs for %s: %v", shortId, err)
 		}
 	}()
 	return nil
 }
 
 // PodmanWait waits until a container has stopped.
-func PodmanWait(ctx context.Context, h Handler, id string) error {
+func PodmanWait(ctx context.Context, id string) error {
 	if _, err := pcontainers.Wait(ctx, id, &pcontainers.WaitOptions{
 		Condition: []pdefine.ContainerStatus{
 			pdefine.ContainerStateStopped,
@@ -222,18 +189,18 @@ func PodmanWait(ctx context.Context, h Handler, id string) error {
 }
 
 // PodmanServiceWait waits for a container service to be available.
-func PodmanServiceWait(ctx context.Context, h Handler, id, svc string, f func(string, string) error) error {
-	local, remote, err := PodmanGetAddr(ctx, h, id, svc)
+func PodmanServiceWait(ctx context.Context, id, svc string, f func(string, string) error) error {
+	local, remote, err := PodmanGetAddr(ctx, id, svc)
 	if err != nil {
 		return err
 	}
-	return h.Backoff(ctx, func() error {
+	return Backoff(ctx, func() error {
 		return f(local, remote)
 	})
 }
 
 // PodmanGetAddr inspects id and returns the local and remote addresses.
-func PodmanGetAddr(ctx context.Context, h Handler, id, svc string) (string, string, error) {
+func PodmanGetAddr(ctx context.Context, id, svc string) (string, string, error) {
 	pod, err := ppods.Inspect(ctx, id, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("unable to retrieve pod infra container for %s: %w", id, err)
