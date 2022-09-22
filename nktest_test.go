@@ -24,9 +24,9 @@ func TestMain(m *testing.M) {
 }
 
 func TestHealthcheck(t *testing.T) {
-	ctx, cancel, nk := WithCancel(context.Background(), t)
+	ctx, cancel, _ := WithCancel(context.Background(), t)
 	defer cancel()
-	urlstr, err := nk.RunProxy(ctx)
+	urlstr, err := RunProxy(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}

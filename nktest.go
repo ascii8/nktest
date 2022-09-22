@@ -61,6 +61,30 @@ func SetVerbose(verbose bool) {
 	}
 }
 
+// Stdout returns the stdout from the context.
+func Stdout(ctx context.Context) io.Writer {
+	if stdout, ok := ctx.Value(stdoutKey).(io.Writer); ok {
+		return stdout
+	}
+	return globalCtx.stdout
+}
+
+// Stderr returns the stderr from the context.
+func Stderr(ctx context.Context) io.Writer {
+	if stderr, ok := ctx.Value(stderrKey).(io.Writer); ok {
+		return stderr
+	}
+	return globalCtx.stderr
+}
+
+// HttpClient returns the http client from the context.
+func HttpClient(ctx context.Context) *http.Client {
+	if httpClient, ok := ctx.Value(httpClientKey).(*http.Client); ok && httpClient != nil {
+		return httpClient
+	}
+	return globalCtx.httpClient
+}
+
 // New creates a new context.
 func New(parent context.Context, opts ...Option) {
 	ctx, cancel := context.WithCancel(parent)
@@ -94,30 +118,6 @@ func Cancel() {
 	}
 }
 
-// Stdout returns the stdout from the context.
-func Stdout(ctx context.Context) io.Writer {
-	if stdout, ok := ctx.Value(stdoutKey).(io.Writer); ok {
-		return stdout
-	}
-	return globalCtx.stdout
-}
-
-// Stderr returns the stderr from the context.
-func Stderr(ctx context.Context) io.Writer {
-	if stderr, ok := ctx.Value(stderrKey).(io.Writer); ok {
-		return stderr
-	}
-	return globalCtx.stderr
-}
-
-// HttpClient returns the http client from the context.
-func HttpClient(ctx context.Context) *http.Client {
-	if httpClient, ok := ctx.Value(httpClientKey).(*http.Client); ok && httpClient != nil {
-		return httpClient
-	}
-	return globalCtx.httpClient
-}
-
 // WithCancel creates a new context for use within Test* funcs.
 func WithCancel(parent context.Context, t TestLogger) (context.Context, context.CancelFunc, *Runner) {
 	ctx, cancel := onecontext.Merge(globalCtx.ctx, parent)
@@ -142,6 +142,14 @@ func Main(parent context.Context, m TestRunner, opts ...Option) {
 	}
 	Cancel()
 	os.Exit(code)
+}
+
+// RunProxy creates and runs a http proxy until the context is closed.
+func RunProxy(ctx context.Context, opts ...ProxyOption) (string, error) {
+	if globalCtx.r == nil {
+		panic("New has not been called")
+	}
+	return globalCtx.r.RunProxy(ctx, opts...)
 }
 
 // TestRunner is the test runner interface. Compatible with stdlib's testing.M.
