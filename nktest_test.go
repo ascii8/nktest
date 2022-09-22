@@ -30,9 +30,8 @@ func TestHealthcheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	urlstr += "/healthcheck"
-	t.Logf("url: %s", urlstr)
-	req, err := http.NewRequestWithContext(ctx, "GET", urlstr, nil)
+	t.Logf("proxy: %s", urlstr)
+	req, err := http.NewRequestWithContext(ctx, "GET", urlstr+"/healthcheck", nil)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -49,7 +48,7 @@ func TestHealthcheck(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("expected %d, got: %d", http.StatusOK, res.StatusCode)
 	}
-	t.Logf("healthcheck is %d", res.StatusCode)
+	t.Logf("healthcheck status: %d", res.StatusCode)
 }
 
 func TestGoEchoSample(t *testing.T) {
