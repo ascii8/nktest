@@ -21,7 +21,6 @@ import (
 var (
 	DefaultPrefixOut             = "-> "
 	DefaultPrefixIn              = "<- "
-	DefaultCancelDelay           = 2200 * time.Millisecond
 	DefaultAlwaysPull            = false
 	DefaultPostgresImageId       = "docker.io/library/postgres"
 	DefaultNakamaImageId         = "docker.io/heroiclabs/nakama"
@@ -32,7 +31,7 @@ var (
 	DefaultDockerAuthName        = "registry.docker.io"
 	DefaultDockerAuthScope       = "repository:%s:pull"
 	DefaultVersionCacheTTL       = 96 * time.Hour
-	DefaultNetworkRemoveDelay    = 1500 * time.Millisecond
+	DefaultNetworkRemoveDelay    = 800 * time.Millisecond
 	DefaultContainerRemoveDelay  = 500 * time.Millisecond
 	DefaultBackoffMaxInterval    = 2 * time.Second
 	DefaultBackoffMaxElapsedTime = 30 * time.Second
@@ -48,7 +47,6 @@ type contextKey int
 const (
 	stdoutKey contextKey = iota
 	stderrKey
-	cancelDelayKey
 	alwaysPullKey
 	dockerRegistryURLKey
 	dockerTokenURLKey
@@ -79,11 +77,6 @@ func WithStdout(parent context.Context, stdout io.Writer) context.Context {
 // WithStderr sets the stderr on the context.
 func WithStderr(parent context.Context, stderr io.Writer) context.Context {
 	return context.WithValue(parent, stderrKey, stderr)
-}
-
-// WithCancelDelay sets the cancel delay on the context.
-func WithCancelDelay(parent context.Context, cancelDelay time.Duration) context.Context {
-	return context.WithValue(parent, cancelDelayKey, cancelDelay)
 }
 
 // WithAlwaysPull sets the always pull flag on the context. When true, causes
@@ -233,14 +226,6 @@ func Logf(ctx context.Context, s string, v ...interface{}) {
 // Errf logs a message to the context's stderr.
 func Errf(ctx context.Context, s string, v ...interface{}) {
 	fmt.Fprintf(Stderr(ctx), strings.TrimRight(s, "\n")+"\n", v...)
-}
-
-// CancelDelay returns the cancel delay.
-func CancelDelay(ctx context.Context) time.Duration {
-	if cancelDelay, ok := ctx.Value(cancelDelayKey).(time.Duration); ok {
-		return cancelDelay
-	}
-	return DefaultCancelDelay
 }
 
 // AlwaysPull returns whether or not to always pull an image.

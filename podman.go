@@ -29,12 +29,12 @@ import (
 // PodmanOpen opens a podman context. If no client exists in the current
 // context, then a new context is created and merged with the parent context,
 // otherwise ctx is passed through unchanged.
-func PodmanOpen(ctx context.Context) (context.Context, error) {
+func PodmanOpen(ctx context.Context) (context.Context, context.Context, error) {
 	// no podman client was passed with the context
 	if _, err := pbindings.GetClient(ctx); err != nil {
 		infos, err := BuildPodmanConnInfo(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var firstErr error
 		for _, info := range infos {
@@ -52,14 +52,14 @@ func PodmanOpen(ctx context.Context) (context.Context, error) {
 					Logf(ctx, "% 16s: %s", "PODMAN", info.URI)
 				}
 				ctx, _ := onecontext.Merge(ctx, conn)
-				return context.WithValue(ctx, podmanConnKey, conn), nil
+				return context.WithValue(ctx, podmanConnKey, conn), conn, nil
 			} else if firstErr == nil {
 				firstErr = err
 			}
 		}
-		return nil, fmt.Errorf("unable to open podman connection: %w", firstErr)
+		return nil, nil, fmt.Errorf("unable to open podman connection: %w", firstErr)
 	}
-	return ctx, nil
+	return ctx, ctx, nil
 }
 
 // PodmanPullImages grabs image ids when not present on the host or when
@@ -80,18 +80,18 @@ func PodmanPullImages(ctx context.Context, ids ...string) error {
 }
 
 // PodmanCreatePod creates a pod network.
-func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string, error) {
+func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string, string, error) {
 	// inspect containder ids and get ports to publish
 	var portMappings []pntypes.PortMapping
 	for _, id := range ids {
 		img, err := pimages.GetImage(ctx, id, nil)
 		if err != nil {
-			return "", fmt.Errorf("unable to inspect image %s: %w", id, err)
+			return "", "", fmt.Errorf("unable to inspect image %s: %w", id, err)
 		}
 		for k := range img.Config.ExposedPorts {
 			port, err := ParsePortMapping(k)
 			if err != nil {
-				return "", fmt.Errorf("image %s has invalid service definition %q: %w", id, k, err)
+				return "", "", fmt.Errorf("image %s has invalid service definition %q: %w", id, k, err)
 			}
 			port.HostPort = HostPortMap(ctx, id, k, port.ContainerPort, port.HostPort)
 			portMappings = append(portMappings, port)
@@ -109,24 +109,29 @@ func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string
 		},
 		Userns: pspecgen.Namespace{NSMode: pspecgen.KeepID},
 	}); err != nil {
-		return "", fmt.Errorf("unable to create network pod spec: %w", err)
+		return "", "", fmt.Errorf("unable to create network pod spec: %w", err)
 	}
 	// create pod
 	res, err := ppods.CreatePodFromSpec(ctx, &pentities.PodSpec{
 		PodSpecGen: *spec,
 	})
 	if err != nil {
-		return "", fmt.Errorf("unable to create network pod: %w", err)
+		return "", "", fmt.Errorf("unable to create network pod: %w", err)
+	}
+	// inspect pod
+	pres, err := ppods.Inspect(ctx, res.Id, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("unable to inspect pod %s: %w", ShortId(res.Id), err)
 	}
 	go func() {
 		<-ctx.Done()
-		<-time.After(NetworkRemoveDelay(ctx))
 		Logf(ctx, "% 16s: %s %s", "REMOVING POD", podName, ShortId(res.Id))
+		<-time.After(NetworkRemoveDelay(ctx))
 		if _, err := ppods.Remove(PodmanConn(ctx), res.Id, nil); err != nil {
 			Errf(ctx, "unable to remove pod %s %s: %v", podName, ShortId(res.Id), err)
 		}
 	}()
-	return res.Id, nil
+	return res.Id, pres.InfraContainerID, nil
 }
 
 // PodmanRun runs a container image id.
@@ -178,6 +183,9 @@ func PodmanFollowLogs(ctx context.Context, id string) error {
 
 // PodmanWait waits until a container has stopped.
 func PodmanWait(ctx context.Context, id string) error {
+	if id == "" {
+		return nil
+	}
 	if _, err := pcontainers.Wait(ctx, id, &pcontainers.WaitOptions{
 		Condition: []pdefine.ContainerStatus{
 			pdefine.ContainerStateStopped,

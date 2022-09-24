@@ -34,9 +34,9 @@ Add to package/module:
 go get github.com/ascii8/nktest
 ```
 
-From Go's [`TestMain`](https://pkg.go.dev/testing#hdr-Main), use the
-[`nktest.Runner`](https://pkg.go.dev/github.com/ascii8/nktest#Runner) to build
-Go modules, and to setup/teardown PostgreSQL and Nakama server containers:
+From Go's [`TestMain`](https://pkg.go.dev/testing#hdr-Main), use
+[`nktest.Main`](https://pkg.go.dev/github.com/ascii8/nktest#Main) to build Go
+modules, and to setup/teardown PostgreSQL and Nakama server containers:
 
 ```go
 import "github.com/ascii8/nktest"
@@ -54,7 +54,8 @@ func TestMain(m *testing.M) {
 }
 ```
 
-Then, from within a `Test*` func:
+Then, from within a `Test*` func, create a cancelable test context, and a
+proxy:
 
 ```go
 import "github.com/ascii8/nktest"
@@ -102,7 +103,7 @@ Use the [`WithHostPortMap()` option](https://pkg.go.dev/github.com/ascii8/nktest
 to publish the Postgres and Nakama server's default ports on the host, and [making
 it easy to write `Example*` tests](example_test.go).
 
-For a better out-of-the-box testing experience, [see the `github.com/ascii8/nakama-go`
+For more advanced testing scenarios, [see the `github.com/ascii8/nakama-go`
 package](https://github.com/ascii8/nakama-go) for a full featured Go Nakama
 client.
 

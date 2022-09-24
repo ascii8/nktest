@@ -31,6 +31,8 @@ type Runner struct {
 	buildConfigs []BuildConfig
 	// podId is the created pod id.
 	podId string
+	// podContainerId is the pod infrastructure container id.
+	podContainerId string
 	// postgresLocal is the local postgres address.
 	postgresLocal string
 	// postgresRemote is the remote postgres address.
@@ -51,24 +53,19 @@ type Runner struct {
 
 // NewRunner creates a new nakama test runner.
 func NewRunner(opts ...Option) *Runner {
-	t := new(Runner)
+	r := new(Runner)
 	for _, o := range opts {
-		o(t)
+		o(r)
 	}
-	return t
+	return r
 }
 
 // Run handles building the nakama plugin and starting the postgres and
 // nakama server containers.
-func (t *Runner) Run(ctx context.Context) error {
+func (r *Runner) Run(ctx context.Context) error {
 	// setup project working directory
-	if err := t.init(ctx); err != nil {
+	if err := r.init(ctx); err != nil {
 		return err
-	}
-	// get the podman context
-	ctx, err := PodmanOpen(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to create podman client: %w", err)
 	}
 	// images
 	postgresImageId, pluginbuilderImageId, nakamaImageId := PostgresImageId(ctx), PluginbuilderImageId(ctx), NakamaImageId(ctx)
@@ -92,24 +89,24 @@ func (t *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("unable to retrieve images: %w", err)
 	}
 	// build modules
-	if err := t.BuildModules(ctx, qualifiedPluginbuilderId); err != nil {
+	if err := r.BuildModules(ctx, qualifiedPluginbuilderId); err != nil {
 		return fmt.Errorf("unable to build modules: %w", err)
 	}
 	// create network for images
-	if t.podId, err = PodmanCreatePod(
+	if r.podId, r.podContainerId, err = PodmanCreatePod(
 		ctx,
-		t.name,
+		r.name,
 		QualifiedId(postgresImageId+":"+postgresVersion),
 		QualifiedId(nakamaImageId+":"+nakamaVersion),
 	); err != nil {
 		return fmt.Errorf("unable to create pod: %w", err)
 	}
 	// run postgres
-	if err := t.RunPostgres(ctx, qualifiedPostgresId); err != nil {
+	if err := r.RunPostgres(ctx, qualifiedPostgresId); err != nil {
 		return fmt.Errorf("unable to start postgres: %w", err)
 	}
 	// run nakama
-	if err := t.RunNakama(ctx, qualifiedNakamaId); err != nil {
+	if err := r.RunNakama(ctx, qualifiedNakamaId); err != nil {
 		return fmt.Errorf("unable to start nakama: %w", err)
 	}
 	return nil
@@ -117,42 +114,42 @@ func (t *Runner) Run(ctx context.Context) error {
 
 // init initializes the environment for running nakama-pluginbuilder and nakama
 // images.
-func (t *Runner) init(ctx context.Context) error {
+func (r *Runner) init(ctx context.Context) error {
 	// use working directory if not set
-	if t.dir == "" {
+	if r.dir == "" {
 		wd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("unable to get working directory: %w", err)
 		}
-		t.dir = wd
+		r.dir = wd
 	}
 	var err error
 	// setup working directory
-	if t.dir, err = realpath.Realpath(t.dir); err != nil {
-		return fmt.Errorf("unable to determine real path for %s: %w", t.dir, err)
+	if r.dir, err = realpath.Realpath(r.dir); err != nil {
+		return fmt.Errorf("unable to determine real path for %s: %w", r.dir, err)
 	}
 	// setup name
-	if t.name == "" {
-		t.name = filepath.Base(t.dir)
+	if r.name == "" {
+		r.name = filepath.Base(r.dir)
 	}
 	// change to directory
-	if err := os.Chdir(t.dir); err != nil {
-		return fmt.Errorf("unable to change to working directory %s: %w", t.dir, err)
+	if err := os.Chdir(r.dir); err != nil {
+		return fmt.Errorf("unable to change to working directory %s: %w", r.dir, err)
 	}
 	// set volume directory
-	if t.volumeDir == "" {
-		t.volumeDir = filepath.Join(t.dir, ".cache")
-		if err := os.MkdirAll(t.volumeDir, 0o755); err != nil {
-			return fmt.Errorf("unable to create volume dir %s: %w", t.volumeDir, err)
+	if r.volumeDir == "" {
+		r.volumeDir = filepath.Join(r.dir, ".cache")
+		if err := os.MkdirAll(r.volumeDir, 0o755); err != nil {
+			return fmt.Errorf("unable to create volume dir %s: %w", r.volumeDir, err)
 		}
 	}
 	// check that volume dir is subdir of working dir
-	if err := IsSubDir(t.dir, t.volumeDir); err != nil {
-		return fmt.Errorf("%s must be subdir of %s: %w", t.volumeDir, t.dir, err)
+	if err := IsSubDir(r.dir, r.volumeDir); err != nil {
+		return fmt.Errorf("%s must be subdir of %s: %w", r.volumeDir, r.dir, err)
 	}
 	// ensure postgres and nakama volume directories exist
 	for _, s := range []string{"nakama", "postgres"} {
-		d := filepath.Join(t.volumeDir, s)
+		d := filepath.Join(r.volumeDir, s)
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return fmt.Errorf("unable to create cache dir %s: %w", d, err)
 		}
@@ -165,22 +162,22 @@ func (t *Runner) init(ctx context.Context) error {
 	// exec config template
 	buf := new(bytes.Buffer)
 	if err := tpl.Execute(buf, map[string]interface{}{
-		"name": t.name,
+		"name": r.name,
 	}); err != nil {
 		return fmt.Errorf("unable to execute template: %w", err)
 	}
 	// write config template
 	configFilename := ConfigFilename(ctx)
-	if err := os.WriteFile(filepath.Join(t.volumeDir, "nakama", configFilename), buf.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(r.volumeDir, "nakama", configFilename), buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("unable to write %s: %w", configFilename, err)
 	}
 	return nil
 }
 
 // BuildModules builds the nakama modules.
-func (t *Runner) BuildModules(ctx context.Context, id string) error {
-	for i, bc := range t.buildConfigs {
-		if err := t.BuildModule(ctx, id, &bc); err != nil {
+func (r *Runner) BuildModules(ctx context.Context, id string) error {
+	for i, bc := range r.buildConfigs {
+		if err := r.BuildModule(ctx, id, &bc); err != nil {
 			return fmt.Errorf("unable to build module %d: %w", i, err)
 		}
 	}
@@ -188,7 +185,7 @@ func (t *Runner) BuildModules(ctx context.Context, id string) error {
 }
 
 // BuildModule builds a nakama plugin module.
-func (t *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) error {
+func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) error {
 	// check module path
 	if bc.modulePath == "" {
 		return fmt.Errorf("must supply module path")
@@ -198,12 +195,12 @@ func (t *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 		return fmt.Errorf("unable to determine real path for %s: %w", dir, err)
 	}
 	// ensure module path is sub dir
-	if err := IsSubDir(t.dir, dir); err != nil {
-		return fmt.Errorf("%s must be subdir of %s: %w", dir, t.dir, err)
+	if err := IsSubDir(r.dir, dir); err != nil {
+		return fmt.Errorf("%s must be subdir of %s: %w", dir, r.dir, err)
 	}
-	pkgDir, err := filepath.Rel(t.dir, dir)
+	pkgDir, err := filepath.Rel(r.dir, dir)
 	if err != nil {
-		return fmt.Errorf("unable to make %s relative to %s: %w", dir, t.dir, err)
+		return fmt.Errorf("unable to make %s relative to %s: %w", dir, r.dir, err)
 	}
 	// apply module opts
 	for _, o := range bc.opts {
@@ -220,13 +217,13 @@ func (t *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	}
 	containerId, err := PodmanRun(
 		ctx,
-		t.podId,
+		r.podId,
 		id,
 		bc.env,
 		append(
 			bc.mounts,
-			filepath.Join(t.dir)+":/builder",
-			filepath.Join(t.volumeDir, "nakama")+":/nakama",
+			filepath.Join(r.dir)+":/builder",
+			filepath.Join(r.volumeDir, "nakama")+":/nakama",
 		),
 		"go",
 		"build",
@@ -244,7 +241,7 @@ func (t *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if err := PodmanWait(ctx, containerId); err != nil {
 		return err
 	}
-	out := filepath.Join(t.volumeDir, "nakama", "modules", bc.out)
+	out := filepath.Join(r.volumeDir, "nakama", "modules", bc.out)
 	fi, err := os.Stat(out)
 	switch {
 	case err != nil && errors.Is(err, os.ErrNotExist):
@@ -257,28 +254,28 @@ func (t *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 }
 
 // RunPostgres runs the postgres server.
-func (t *Runner) RunPostgres(ctx context.Context, id string) error {
+func (r *Runner) RunPostgres(ctx context.Context, id string) error {
 	containerId, err := PodmanRun(
 		ctx,
-		t.podId,
+		r.podId,
 		id,
 		map[string]string{
 			"listen_addresses":  "'*'",
-			"POSTGRES_PASSWORD": t.name,
-			"POSTGRES_USER":     t.name,
-			"POSTGRES_DB":       t.name,
+			"POSTGRES_PASSWORD": r.name,
+			"POSTGRES_USER":     r.name,
+			"POSTGRES_DB":       r.name,
 		},
 		[]string{
-			filepath.Join(t.volumeDir, "postgres") + ":/var/lib/postgresql/data",
+			filepath.Join(r.volumeDir, "postgres") + ":/var/lib/postgresql/data",
 		},
 	)
 	if err != nil {
 		return fmt.Errorf("unable to run %s: %w", id, err)
 	}
-	if err := PodmanServiceWait(ctx, t.podId, "5432/tcp", func(local, remote string) error {
-		t.postgresLocal = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", t.name, t.name, local, t.name)
-		t.postgresRemote = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", t.name, t.name, remote, t.name)
-		db, err := sql.Open("postgres", t.postgresLocal)
+	if err := PodmanServiceWait(ctx, r.podId, "5432/tcp", func(local, remote string) error {
+		r.postgresLocal = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", r.name, r.name, local, r.name)
+		r.postgresRemote = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", r.name, r.name, remote, r.name)
+		db, err := sql.Open("postgres", r.postgresLocal)
 		if err != nil {
 			return err
 		}
@@ -290,22 +287,22 @@ func (t *Runner) RunPostgres(ctx context.Context, id string) error {
 }
 
 // RunNakama runs the nakama server.
-func (t *Runner) RunNakama(ctx context.Context, id string) error {
+func (r *Runner) RunNakama(ctx context.Context, id string) error {
 	containerId, err := PodmanRun(
 		ctx,
-		t.podId,
+		r.podId,
 		id,
 		nil,
 		[]string{
-			filepath.Join(t.volumeDir, "nakama") + ":/nakama/data",
+			filepath.Join(r.volumeDir, "nakama") + ":/nakama/data",
 		},
 		`/bin/sh`,
 		`-ecx`,
 		`/nakama/nakama migrate up `+
-			`--database.address=`+t.postgresRemote+` && `+
+			`--database.address=`+r.postgresRemote+` && `+
 			`exec /nakama/nakama `+
 			`--config=/nakama/data/config.yml `+
-			`--database.address=`+t.postgresRemote,
+			`--database.address=`+r.postgresRemote,
 	)
 	if err != nil {
 		return fmt.Errorf("unable to run %s: %w", id, err)
@@ -315,10 +312,10 @@ func (t *Runner) RunNakama(ctx context.Context, id string) error {
 		return fmt.Errorf("unable to follow logs for %s: %w", ShortId(containerId), err)
 	}
 	// wait for http to be available
-	if err := PodmanServiceWait(ctx, t.podId, "7350/tcp", func(local, remote string) error {
-		t.httpLocal = "http://" + local
-		t.httpRemote = "http://" + remote
-		req, err := http.NewRequestWithContext(ctx, "GET", t.httpLocal+"/healthcheck", nil)
+	if err := PodmanServiceWait(ctx, r.podId, "7350/tcp", func(local, remote string) error {
+		r.httpLocal = "http://" + local
+		r.httpRemote = "http://" + remote
+		req, err := http.NewRequestWithContext(ctx, "GET", r.httpLocal+"/healthcheck", nil)
 		if err != nil {
 			return err
 		}
@@ -336,18 +333,18 @@ func (t *Runner) RunNakama(ctx context.Context, id string) error {
 		return fmt.Errorf("unable to connect to %s (http): %w", ShortId(containerId), err)
 	}
 	// grpc ports
-	if err := PodmanServiceWait(ctx, t.podId, "7349/tcp", func(local, remote string) error {
-		t.grpcLocal = local
-		t.grpcRemote = remote
+	if err := PodmanServiceWait(ctx, r.podId, "7349/tcp", func(local, remote string) error {
+		r.grpcLocal = local
+		r.grpcRemote = remote
 		return nil
 	}); err != nil {
 		return fmt.Errorf("unable to connect to %s (grpc): %w", ShortId(containerId), err)
 	}
 	// console ports
-	if err := PodmanServiceWait(ctx, t.podId, "7351/tcp", func(local, remote string) error {
-		prefix := "http://" + t.name + ":" + t.name + "_password@"
-		t.consoleLocal = prefix + local
-		t.consoleRemote = prefix + remote
+	if err := PodmanServiceWait(ctx, r.podId, "7351/tcp", func(local, remote string) error {
+		prefix := "http://" + r.name + ":" + r.name + "_password@"
+		r.consoleLocal = prefix + local
+		r.consoleRemote = prefix + remote
 		return nil
 	}); err != nil {
 		return fmt.Errorf("unable to connect to %s (console): %w", ShortId(containerId), err)
@@ -356,68 +353,73 @@ func (t *Runner) RunNakama(ctx context.Context, id string) error {
 }
 
 // RunProxy creates and runs a http proxy until the context is closed.
-func (t *Runner) RunProxy(ctx context.Context, opts ...ProxyOption) (string, error) {
-	return NewProxy(opts...).Run(ctx, t.httpLocal)
+func (r *Runner) RunProxy(ctx context.Context, opts ...ProxyOption) (string, error) {
+	return NewProxy(opts...).Run(ctx, r.httpLocal)
 }
 
 // PodId returns the pod id.
-func (t *Runner) PodId() string {
-	return t.podId
+func (r *Runner) PodId() string {
+	return r.podId
+}
+
+// PodContainerId returns the pod infrastructure container id.
+func (r *Runner) PodContainerId() string {
+	return r.podContainerId
 }
 
 // PostgresLocal returns the postgres local address.
-func (t *Runner) PostgresLocal() string {
-	return t.postgresLocal
+func (r *Runner) PostgresLocal() string {
+	return r.postgresLocal
 }
 
 // PostgresRemote returns the postgres remote address.
-func (t *Runner) PostgresRemote() string {
-	return t.postgresRemote
+func (r *Runner) PostgresRemote() string {
+	return r.postgresRemote
 }
 
 // HttpLocal returns the http local address.
-func (t *Runner) HttpLocal() string {
-	return t.httpLocal
+func (r *Runner) HttpLocal() string {
+	return r.httpLocal
 }
 
 // HttpRemote returns the http remote address.
-func (t *Runner) HttpRemote() string {
-	return t.httpRemote
+func (r *Runner) HttpRemote() string {
+	return r.httpRemote
 }
 
 // GrpcLocal returns the grpc local address.
-func (t *Runner) GrpcLocal() string {
-	return t.grpcLocal
+func (r *Runner) GrpcLocal() string {
+	return r.grpcLocal
 }
 
 // GrpcRemote returns the grpc remote address.
-func (t *Runner) GrpcRemote() string {
-	return t.grpcRemote
+func (r *Runner) GrpcRemote() string {
+	return r.grpcRemote
 }
 
 // ConsoleLocal returns the console local address.
-func (t *Runner) ConsoleLocal() string {
-	return t.consoleLocal
+func (r *Runner) ConsoleLocal() string {
+	return r.consoleLocal
 }
 
 // ConsoleRemote returns the console remote address.
-func (t *Runner) ConsoleRemote() string {
-	return t.consoleRemote
+func (r *Runner) ConsoleRemote() string {
+	return r.consoleRemote
 }
 
 // Name returns the name.
-func (t *Runner) Name() string {
-	return t.name
+func (r *Runner) Name() string {
+	return r.name
 }
 
 // HttpKey returns the http key.
-func (t *Runner) HttpKey() string {
-	return t.name
+func (r *Runner) HttpKey() string {
+	return r.name
 }
 
 // ServerKey returns the server key.
-func (t *Runner) ServerKey() string {
-	return t.name + "_server"
+func (r *Runner) ServerKey() string {
+	return r.name + "_server"
 }
 
 // Option is a nakama test runner option.
@@ -425,8 +427,8 @@ type Option func(*Runner)
 
 // WithDir is a nakama test runner option to set the project root dir.
 func WithDir(dir string) Option {
-	return func(t *Runner) {
-		t.dir = dir
+	return func(r *Runner) {
+		r.dir = dir
 	}
 }
 
@@ -434,16 +436,16 @@ func WithDir(dir string) Option {
 // nakama and postgres data/configs are written. Default is <project
 // root>/.cache. Must be a sub dir of the project root.
 func WithVolumeDir(volumeDir string) Option {
-	return func(t *Runner) {
-		t.volumeDir = volumeDir
+	return func(r *Runner) {
+		r.volumeDir = volumeDir
 	}
 }
 
 // WithBuildConfig is a nakama test runner option to add a module path, and extra
 // options to the build config.
 func WithBuildConfig(modulePath string, opts ...BuildConfigOption) Option {
-	return func(t *Runner) {
-		t.buildConfigs = append(t.buildConfigs, BuildConfig{
+	return func(r *Runner) {
+		r.buildConfigs = append(r.buildConfigs, BuildConfig{
 			modulePath: modulePath,
 			opts:       opts,
 		})
