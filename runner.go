@@ -3,6 +3,7 @@ package nktest
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"database/sql"
 	_ "embed"
 	"errors"
@@ -21,10 +22,14 @@ import (
 
 // Runner is a nakama test runner.
 type Runner struct {
-	// name is the name pod.
-	name string
-	// dir is the working directory.
+	// wd is the working directory.
+	wd string
+	// dir is the base directory.
 	dir string
+	// name is the app name.
+	name string
+	// podName is the pod name.
+	podName string
 	// volumeDir is the directory for container volumes.
 	volumeDir string
 	// buildConfigs are the module build configs.
@@ -60,70 +65,21 @@ func NewRunner(opts ...Option) *Runner {
 	return r
 }
 
-// Run handles building the nakama plugin and starting the postgres and
-// nakama server containers.
-func (r *Runner) Run(ctx context.Context) error {
-	// setup project working directory
-	if err := r.init(ctx); err != nil {
-		return err
-	}
-	// images
-	postgresImageId, pluginbuilderImageId, nakamaImageId := PostgresImageId(ctx), PluginbuilderImageId(ctx), NakamaImageId(ctx)
-	// versions
-	postgresVersion := PostgresVersion(ctx)
-	nakamaVersion, err := NakamaVersion(ctx)
-	if err != nil {
-		return err
-	}
-	Logf(ctx, "% 16s: %s", "NAKAMA VERSION", nakamaVersion)
-	qualifiedPostgresId := QualifiedId(postgresImageId + ":" + postgresVersion)
-	qualifiedPluginbuilderId := QualifiedId(pluginbuilderImageId + ":" + nakamaVersion)
-	qualifiedNakamaId := QualifiedId(nakamaImageId + ":" + nakamaVersion)
-	// retrieve images
-	if err := PodmanPullImages(
-		ctx,
-		qualifiedPostgresId,
-		qualifiedPluginbuilderId,
-		qualifiedNakamaId,
-	); err != nil {
-		return fmt.Errorf("unable to retrieve images: %w", err)
-	}
-	// build modules
-	if err := r.BuildModules(ctx, qualifiedPluginbuilderId); err != nil {
-		return fmt.Errorf("unable to build modules: %w", err)
-	}
-	// create network for images
-	if r.podId, r.podContainerId, err = PodmanCreatePod(
-		ctx,
-		r.name,
-		QualifiedId(postgresImageId+":"+postgresVersion),
-		QualifiedId(nakamaImageId+":"+nakamaVersion),
-	); err != nil {
-		return fmt.Errorf("unable to create pod: %w", err)
-	}
-	// run postgres
-	if err := r.RunPostgres(ctx, qualifiedPostgresId); err != nil {
-		return fmt.Errorf("unable to start postgres: %w", err)
-	}
-	// run nakama
-	if err := r.RunNakama(ctx, qualifiedNakamaId); err != nil {
-		return fmt.Errorf("unable to start nakama: %w", err)
-	}
-	return nil
-}
-
 // init initializes the environment for running nakama-pluginbuilder and nakama
 // images.
 func (r *Runner) init(ctx context.Context) error {
-	// use working directory if not set
-	if r.dir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("unable to get working directory: %w", err)
-		}
-		r.dir = wd
-	}
 	var err error
+	// get working directory
+	if r.wd, err = os.Getwd(); err != nil {
+		return fmt.Errorf("unable to get working directory: %w", err)
+	}
+	if r.wd, err = realpath.Realpath(r.wd); err != nil {
+		return fmt.Errorf("unable to determine real path for %s: %w", r.dir, err)
+	}
+	// use working directory as base if not set
+	if r.dir == "" {
+		r.dir = r.wd
+	}
 	// setup working directory
 	if r.dir, err = realpath.Realpath(r.dir); err != nil {
 		return fmt.Errorf("unable to determine real path for %s: %w", r.dir, err)
@@ -131,6 +87,10 @@ func (r *Runner) init(ctx context.Context) error {
 	// setup name
 	if r.name == "" {
 		r.name = filepath.Base(r.dir)
+	}
+	// setup pod name
+	if r.podName == "" {
+		r.podName = ShortId(fmt.Sprintf("%x", md5.Sum([]byte(r.dir))))
 	}
 	// change to directory
 	if err := os.Chdir(r.dir); err != nil {
@@ -170,6 +130,62 @@ func (r *Runner) init(ctx context.Context) error {
 	configFilename := ConfigFilename(ctx)
 	if err := os.WriteFile(filepath.Join(r.volumeDir, "nakama", configFilename), buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("unable to write %s: %w", configFilename, err)
+	}
+	return nil
+}
+
+// Run handles building the nakama plugin and starting the postgres and
+// nakama server containers.
+func (r *Runner) Run(ctx context.Context) error {
+	// setup project working directory
+	if err := r.init(ctx); err != nil {
+		return err
+	}
+	// cleanup environment
+	if err := PodmanPodKill(ctx, r.podName); err != nil {
+		return err
+	}
+	// images
+	postgresImageId, pluginbuilderImageId, nakamaImageId := PostgresImageId(ctx), PluginbuilderImageId(ctx), NakamaImageId(ctx)
+	// versions
+	postgresVersion := PostgresVersion(ctx)
+	nakamaVersion, err := NakamaVersion(ctx)
+	if err != nil {
+		return err
+	}
+	Logf(ctx, "% 16s: %s", "NAKAMA VERSION", nakamaVersion)
+	qualifiedPostgresId := QualifiedId(postgresImageId + ":" + postgresVersion)
+	qualifiedPluginbuilderId := QualifiedId(pluginbuilderImageId + ":" + nakamaVersion)
+	qualifiedNakamaId := QualifiedId(nakamaImageId + ":" + nakamaVersion)
+	// retrieve images
+	if err := PodmanPullImages(
+		ctx,
+		qualifiedPostgresId,
+		qualifiedPluginbuilderId,
+		qualifiedNakamaId,
+	); err != nil {
+		return fmt.Errorf("unable to retrieve images: %w", err)
+	}
+	// build modules
+	if err := r.BuildModules(ctx, qualifiedPluginbuilderId); err != nil {
+		return fmt.Errorf("unable to build modules: %w", err)
+	}
+	// create network for images
+	if r.podId, r.podContainerId, err = PodmanCreatePod(
+		ctx,
+		r.podName,
+		QualifiedId(postgresImageId+":"+postgresVersion),
+		QualifiedId(nakamaImageId+":"+nakamaVersion),
+	); err != nil {
+		return fmt.Errorf("unable to create pod: %w", err)
+	}
+	// run postgres
+	if err := r.RunPostgres(ctx, qualifiedPostgresId); err != nil {
+		return fmt.Errorf("unable to start postgres: %w", err)
+	}
+	// run nakama
+	if err := r.RunNakama(ctx, qualifiedNakamaId); err != nil {
+		return fmt.Errorf("unable to start nakama: %w", err)
 	}
 	return nil
 }
@@ -215,6 +231,18 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if bc.out == "" {
 		bc.out = bc.name + ".so"
 	}
+	// build out
+	out := filepath.Join(r.volumeDir, "nakama", "modules", bc.out)
+	// remove module if exists
+	switch fi, err := os.Stat(out); {
+	case err == nil && !fi.IsDir():
+		if err := os.Remove(out); err != nil {
+			return fmt.Errorf("unable to remove %s: %w", out, err)
+		}
+	case err != nil && errors.Is(err, os.ErrNotExist):
+	case err != nil:
+		return fmt.Errorf("could not stat %s: %w", out, err)
+	}
 	containerId, err := PodmanRun(
 		ctx,
 		r.podId,
@@ -241,13 +269,16 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if err := PodmanWait(ctx, containerId); err != nil {
 		return err
 	}
-	out := filepath.Join(r.volumeDir, "nakama", "modules", bc.out)
 	fi, err := os.Stat(out)
 	switch {
 	case err != nil && errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("missing %s: %w", out, err)
 	case err != nil:
 		return fmt.Errorf("could not stat %s: %w", out, err)
+	}
+	// make out relative to wd if possible
+	if rel, err := filepath.Rel(r.wd, out); err == nil {
+		out = "./" + rel
 	}
 	Logf(ctx, "% 16s: %s %d", "BUILT", out, fi.Size())
 	return nil

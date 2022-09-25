@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	pntypes "github.com/containers/common/libnetwork/types"
 	pdefine "github.com/containers/podman/v4/libpod/define"
@@ -79,6 +78,23 @@ func PodmanPullImages(ctx context.Context, ids ...string) error {
 	return nil
 }
 
+// PodmanPodKill kills pod with matching name.
+func PodmanPodKill(ctx context.Context, name string) error {
+	res, err := ppods.List(ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, p := range res {
+		if p.Name == name {
+			Logf(ctx, "% 16s: %s %s", "STOPPING POD", name, ShortId(p.Id))
+			_, _ = ppods.Stop(ctx, p.Id, new(ppods.StopOptions).WithTimeout(int(PodRemoveTimeout(ctx))))
+			Logf(ctx, "% 16s: %s %s", "REMOVING POD", name, ShortId(p.Id))
+			_, _ = ppods.Remove(ctx, p.Id, new(ppods.RemoveOptions).WithTimeout(uint(PodRemoveTimeout(ctx))))
+		}
+	}
+	return nil
+}
+
 // PodmanCreatePod creates a pod network.
 func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string, string, error) {
 	// inspect containder ids and get ports to publish
@@ -125,11 +141,7 @@ func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string
 	}
 	go func() {
 		<-ctx.Done()
-		Logf(ctx, "% 16s: %s %s", "REMOVING POD", podName, ShortId(res.Id))
-		<-time.After(NetworkRemoveDelay(ctx))
-		if _, err := ppods.Remove(PodmanConn(ctx), res.Id, nil); err != nil {
-			Errf(ctx, "unable to remove pod %s %s: %v", podName, ShortId(res.Id), err)
-		}
+		_ = PodmanPodKill(PodmanConn(ctx), pres.Name)
 	}()
 	return res.Id, pres.InfraContainerID, nil
 }
@@ -156,8 +168,10 @@ func PodmanRun(ctx context.Context, podId, id string, env map[string]string, mou
 	go func() {
 		<-ctx.Done()
 		Logf(ctx, "% 16s: %s %s", "STOPPING", id, ShortId(res.ID))
-		opts := new(pcontainers.StopOptions).WithTimeout(uint(ContainerRemoveDelay(ctx).Seconds()))
-		if err := pcontainers.Stop(PodmanConn(ctx), res.ID, opts); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) {
+		if err := pcontainers.Stop(
+			PodmanConn(ctx), res.ID,
+			new(pcontainers.StopOptions).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
+		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) {
 			Errf(ctx, "unable to stop container %s %s: %v", id, ShortId(res.ID), err)
 		}
 	}()

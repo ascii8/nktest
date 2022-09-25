@@ -26,7 +26,7 @@ var globalCtx struct {
 	httpClient *http.Client
 	ctx        context.Context
 	conn       context.Context
-	cancel     func()
+	cancel     context.CancelFunc
 	r          *Runner
 }
 
@@ -49,8 +49,8 @@ func SetVerbose(verbose bool) {
 		stdout = os.Stdout
 		stderr = os.Stderr
 		transport = NewRoundTripper(
-			PrefixedWriter(stdout, strings.Repeat(" ", 16-len(DefaultPrefixOut))+DefaultPrefixOut),
-			PrefixedWriter(stderr, strings.Repeat(" ", 16-len(DefaultPrefixIn))+DefaultPrefixIn),
+			PrefixedWriter(stdout, strings.Repeat(" ", 18-len(DefaultPrefixOut))+DefaultPrefixOut),
+			PrefixedWriter(stderr, strings.Repeat(" ", 18-len(DefaultPrefixIn))+DefaultPrefixIn),
 			transport,
 		)
 	}
@@ -75,6 +75,25 @@ func Stderr(ctx context.Context) io.Writer {
 		return stderr
 	}
 	return globalCtx.stderr
+}
+
+// Logf logs a message to the context's stdout.
+func Logf(ctx context.Context, s string, v ...interface{}) {
+	fmt.Fprintf(Stdout(ctx), strings.TrimRight(s, "\n")+"\n", v...)
+}
+
+// Errf logs a message to the context's stderr.
+func Errf(ctx context.Context, s string, v ...interface{}) {
+	fmt.Fprintf(Stderr(ctx), strings.TrimRight(s, "\n")+"\n", v...)
+}
+
+// Transport creates a transport from the context.
+func Transport(ctx context.Context, transport http.RoundTripper) http.RoundTripper {
+	return NewRoundTripper(
+		PrefixedWriter(Stdout(ctx), DefaultPrefixOut),
+		PrefixedWriter(Stdout(ctx), DefaultPrefixIn),
+		transport,
+	)
 }
 
 // HttpClient returns the http client from the context.

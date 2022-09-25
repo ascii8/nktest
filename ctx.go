@@ -31,8 +31,7 @@ var (
 	DefaultDockerAuthName        = "registry.docker.io"
 	DefaultDockerAuthScope       = "repository:%s:pull"
 	DefaultVersionCacheTTL       = 96 * time.Hour
-	DefaultNetworkRemoveDelay    = 800 * time.Millisecond
-	DefaultContainerRemoveDelay  = 500 * time.Millisecond
+	DefaultPodRemoveTimeout      = 200 * time.Millisecond
 	DefaultBackoffMaxInterval    = 2 * time.Second
 	DefaultBackoffMaxElapsedTime = 30 * time.Second
 	DefaultConfigFilename        = "config.yml"
@@ -47,6 +46,9 @@ type contextKey int
 const (
 	stdoutKey contextKey = iota
 	stderrKey
+	httpClientKey
+	podmanConnKey
+	portMapKey
 	alwaysPullKey
 	dockerRegistryURLKey
 	dockerTokenURLKey
@@ -59,14 +61,10 @@ const (
 	nakamaVersionKey
 	configFilenameKey
 	configTemplateKey
-	networkRemoveDelayKey
-	containerRemoveDelayKey
 	versionCacheTTLKey
+	podRemoveTimeoutKey
 	backoffMaxIntervalKey
 	backoffMaxElapsedTimeKey
-	httpClientKey
-	podmanConnKey
-	portMapKey
 )
 
 // WithStdout sets the stdout on the context.
@@ -77,6 +75,44 @@ func WithStdout(parent context.Context, stdout io.Writer) context.Context {
 // WithStderr sets the stderr on the context.
 func WithStderr(parent context.Context, stderr io.Writer) context.Context {
 	return context.WithValue(parent, stderrKey, stderr)
+}
+
+// WithHttpClient sets the http client used on the context. Used for generating
+// auth tokens for image repositories.
+func WithHttpClient(parent context.Context, httpClient *http.Client) context.Context {
+	return context.WithValue(parent, httpClientKey, httpClient)
+}
+
+// WithPodmanConn sets the podman conn used on the context.
+func WithPodmanConn(parent, conn context.Context) context.Context {
+	return context.WithValue(parent, podmanConnKey, conn)
+}
+
+// WithPortMap adds a host port mapping for a service to the context.
+func WithPortMap(parent context.Context, id, svc string, port uint16) context.Context {
+	ctx := parent
+	portMap, ok := ctx.Value(portMapKey).(map[string]uint16)
+	if !ok {
+		portMap = make(map[string]uint16)
+		ctx = context.WithValue(ctx, portMapKey, portMap)
+	}
+	if id != "" {
+		portMap[QualifiedId(id)+":"+svc] = port
+	} else {
+		portMap[svc] = port
+	}
+	return ctx
+}
+
+// WithHostPortMap adds host port mappings for the postgres and nakama services
+// (5432/tcp, 7349/tcp, 7350/tcp, 7351/tcp) to the context.
+func WithHostPortMap(parent context.Context) context.Context {
+	ctx := parent
+	ctx = WithPortMap(ctx, "postgres", "5432/tcp", 5432)
+	ctx = WithPortMap(ctx, "heroiclabs/nakama", "7349/tcp", 7349)
+	ctx = WithPortMap(ctx, "heroiclabs/nakama", "7350/tcp", 7350)
+	ctx = WithPortMap(ctx, "heroiclabs/nakama", "7351/tcp", 7351)
+	return ctx
 }
 
 // WithAlwaysPull sets the always pull flag on the context. When true, causes
@@ -152,19 +188,14 @@ func WithConfigTemplate(parent context.Context, configTemplate string) context.C
 	return context.WithValue(parent, configTemplateKey, configTemplate)
 }
 
-// WithNetworkRemoveDelay sets the container network remove delay on the context.
-func WithNetworkRemoveDelay(parent context.Context, networkRemoveDelay time.Duration) context.Context {
-	return context.WithValue(parent, networkRemoveDelayKey, networkRemoveDelay)
-}
-
-// WithContainerRemoveDelay sets the container remove delay on the context.
-func WithContainerRemoveDelay(parent context.Context, containerRemoveDelay time.Duration) context.Context {
-	return context.WithValue(parent, containerRemoveDelayKey, containerRemoveDelay)
-}
-
 // WithVersionCacheTTL sets the version cache TTL on the context.
 func WithVersionCacheTTL(parent context.Context, versionCacheTTL time.Duration) context.Context {
 	return context.WithValue(parent, versionCacheTTLKey, versionCacheTTL)
+}
+
+// WithPodRemoveTimeout sets the pod remove timeout on the context.
+func WithPodRemoveTimeout(parent context.Context, podRemoveTimeout time.Duration) context.Context {
+	return context.WithValue(parent, podRemoveTimeoutKey, podRemoveTimeout)
 }
 
 // WithBackofffMaxInterval sets the max backoff interval on the context. Used
@@ -180,52 +211,38 @@ func WithBackoffMaxElapsedTime(parent context.Context, maxElapsedTime time.Durat
 	return context.WithValue(parent, backoffMaxElapsedTimeKey, maxElapsedTime)
 }
 
-// WithHttpClient sets the http client used on the context. Used for generating
-// auth tokens for image repositories.
-func WithHttpClient(parent context.Context, httpClient *http.Client) context.Context {
-	return context.WithValue(parent, httpClientKey, httpClient)
-}
-
-// WithPodmanConn sets the podman conn used on the context.
-func WithPodmanConn(parent, conn context.Context) context.Context {
-	return context.WithValue(parent, podmanConnKey, conn)
-}
-
-// WithPortMap adds a host port mapping for a service to the context.
-func WithPortMap(parent context.Context, id, svc string, port uint16) context.Context {
-	ctx := parent
-	portMap, ok := ctx.Value(portMapKey).(map[string]uint16)
-	if !ok {
-		portMap = make(map[string]uint16)
-		ctx = context.WithValue(ctx, portMapKey, portMap)
+// PortMap returns the port map from the context.
+func PortMap(ctx context.Context) map[string]uint16 {
+	if portMap, ok := ctx.Value(portMapKey).(map[string]uint16); ok && portMap != nil {
+		return portMap
 	}
-	if id != "" {
-		portMap[QualifiedId(id)+":"+svc] = port
-	} else {
-		portMap[svc] = port
+	return map[string]uint16{}
+}
+
+// HostPortMap returns the host port for the provided container id and service from the context.
+func HostPortMap(ctx context.Context, id, svc string, containerPort, hostPort uint16) uint16 {
+	portMap := PortMap(ctx)
+	ids := []string{id}
+	if i := strings.LastIndex(id, ":"); i != -1 {
+		ids = append(ids, id[:i])
+	}
+	for _, s := range ids {
+		if p, ok := portMap[s+":"+svc]; ok {
+			return p
+		}
+	}
+	if p, ok := portMap[svc]; ok {
+		return p
+	}
+	return hostPort
+}
+
+// PodmanConn returns the podman connection on the context.
+func PodmanConn(ctx context.Context) context.Context {
+	if conn, ok := ctx.Value(podmanConnKey).(context.Context); ok && conn != nil {
+		return conn
 	}
 	return ctx
-}
-
-// WithHostPortMap adds host port mappings for the postgres and nakama services
-// (5432/tcp, 7349/tcp, 7350/tcp, 7351/tcp) to the context.
-func WithHostPortMap(parent context.Context) context.Context {
-	ctx := parent
-	ctx = WithPortMap(ctx, "postgres", "5432/tcp", 5432)
-	ctx = WithPortMap(ctx, "heroiclabs/nakama", "7349/tcp", 7349)
-	ctx = WithPortMap(ctx, "heroiclabs/nakama", "7350/tcp", 7350)
-	ctx = WithPortMap(ctx, "heroiclabs/nakama", "7351/tcp", 7351)
-	return ctx
-}
-
-// Logf logs a message to the context's stdout.
-func Logf(ctx context.Context, s string, v ...interface{}) {
-	fmt.Fprintf(Stdout(ctx), strings.TrimRight(s, "\n")+"\n", v...)
-}
-
-// Errf logs a message to the context's stderr.
-func Errf(ctx context.Context, s string, v ...interface{}) {
-	fmt.Fprintf(Stderr(ctx), strings.TrimRight(s, "\n")+"\n", v...)
 }
 
 // AlwaysPull returns whether or not to always pull an image.
@@ -301,30 +318,6 @@ func PostgresImageId(ctx context.Context) string {
 	return DefaultPostgresImageId
 }
 
-// NetworkRemoveDelay returns the network remove delay.
-func NetworkRemoveDelay(ctx context.Context) time.Duration {
-	if networkRemoveDelay, ok := ctx.Value(networkRemoveDelayKey).(time.Duration); ok {
-		return networkRemoveDelay
-	}
-	return DefaultNetworkRemoveDelay
-}
-
-// ContainerRemoveDelay returns the container remove delay.
-func ContainerRemoveDelay(ctx context.Context) time.Duration {
-	if networkRemoveDelay, ok := ctx.Value(networkRemoveDelayKey).(time.Duration); ok {
-		return networkRemoveDelay
-	}
-	return DefaultContainerRemoveDelay
-}
-
-// VersionCacheTTL returns the version cache ttl.
-func VersionCacheTTL(ctx context.Context) time.Duration {
-	if versionCacheTTL, ok := ctx.Value(versionCacheTTLKey).(time.Duration); ok {
-		return versionCacheTTL
-	}
-	return DefaultVersionCacheTTL
-}
-
 // NakamaVersion loads and caches the nakama version.
 func NakamaVersion(ctx context.Context) (string, error) {
 	if ver, _ := ctx.Value(nakamaVersionKey).(string); ver != "" {
@@ -388,6 +381,22 @@ func NakamaVersion(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("no available version of %s matches available versions for %s", pluginbuilderImageId, nakamaImageId)
 }
 
+// VersionCacheTTL returns the version cache ttl.
+func VersionCacheTTL(ctx context.Context) time.Duration {
+	if versionCacheTTL, ok := ctx.Value(versionCacheTTLKey).(time.Duration); ok {
+		return versionCacheTTL
+	}
+	return DefaultVersionCacheTTL
+}
+
+// PodRemoveTimeout returns the pod remove timeout.
+func PodRemoveTimeout(ctx context.Context) time.Duration {
+	if podRemoveTimeout, ok := ctx.Value(podRemoveTimeoutKey).(time.Duration); ok {
+		return podRemoveTimeout
+	}
+	return DefaultPodRemoveTimeout
+}
+
 // Backoff executes f until backoff conditions are met or until f returns nil,
 // or the context is closed.
 func Backoff(ctx context.Context, f func() error) error {
@@ -401,40 +410,6 @@ func Backoff(ctx context.Context, f func() error) error {
 		p.MaxElapsedTime = d
 	}
 	return backoff.Retry(f, backoff.WithContext(p, ctx))
-}
-
-// PortMap returns the port map from the context.
-func PortMap(ctx context.Context) map[string]uint16 {
-	if portMap, ok := ctx.Value(portMapKey).(map[string]uint16); ok && portMap != nil {
-		return portMap
-	}
-	return map[string]uint16{}
-}
-
-// HostPortMap returns the host port for the provided container id and service from the context.
-func HostPortMap(ctx context.Context, id, svc string, containerPort, hostPort uint16) uint16 {
-	portMap := PortMap(ctx)
-	ids := []string{id}
-	if i := strings.LastIndex(id, ":"); i != -1 {
-		ids = append(ids, id[:i])
-	}
-	for _, s := range ids {
-		if p, ok := portMap[s+":"+svc]; ok {
-			return p
-		}
-	}
-	if p, ok := portMap[svc]; ok {
-		return p
-	}
-	return hostPort
-}
-
-// PodmanConn returns the podman connection on the context.
-func PodmanConn(ctx context.Context) context.Context {
-	if conn, ok := ctx.Value(podmanConnKey).(context.Context); ok && conn != nil {
-		return conn
-	}
-	return ctx
 }
 
 // ConfigTemplate returns the config template.
@@ -451,13 +426,4 @@ func ConfigFilename(ctx context.Context) string {
 		return configFilename
 	}
 	return DefaultConfigFilename
-}
-
-// Transport creates a transport from the context.
-func Transport(ctx context.Context, transport http.RoundTripper) http.RoundTripper {
-	return NewRoundTripper(
-		PrefixedWriter(Stdout(ctx), DefaultPrefixOut),
-		PrefixedWriter(Stdout(ctx), DefaultPrefixIn),
-		transport,
-	)
 }
