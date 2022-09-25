@@ -16,6 +16,8 @@ func DockerImageTags(ctx context.Context, id string) ([]string, error) {
 		return nil, err
 	}
 	switch {
+	case strings.HasPrefix(id, "localhost/"):
+		return nil, nil
 	case !strings.HasPrefix(id, "docker.io/"):
 		return nil, fmt.Errorf("%s is not fully qualified", id)
 	case strings.HasPrefix(id, "docker.io/library/"):
@@ -51,6 +53,8 @@ func DockerImageTags(ctx context.Context, id string) ([]string, error) {
 // DockerToken generates a docker auth token for the repo id.
 func DockerToken(ctx context.Context, id string) (string, error) {
 	switch {
+	case strings.HasPrefix(id, "localhost/"):
+		return "", nil
 	case !strings.HasPrefix(id, "docker.io/"):
 		return "", fmt.Errorf("%s is not fully qualified", id)
 	case strings.HasPrefix(id, "docker.io/library/"):

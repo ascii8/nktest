@@ -342,13 +342,19 @@ func NakamaVersion(ctx context.Context) (string, error) {
 	Logf(ctx, "% 16s: %s, %s", "REFRESHING", nakamaImageId, pluginbuilderImageId)
 	// get nakama versions
 	nk, err := DockerImageTags(ctx, nakamaImageId)
-	if err != nil {
+	switch {
+	case err != nil:
 		return "", fmt.Errorf("unable to get tags for %s: %w", nakamaImageId, err)
+	case len(nk) == 0:
+		return "", fmt.Errorf("no tags available for %s", nakamaImageId)
 	}
 	// get pluginbuilder versions
 	pb, err := DockerImageTags(ctx, pluginbuilderImageId)
-	if err != nil {
+	switch {
+	case err != nil:
 		return "", fmt.Errorf("unable to get tags for %s: %w", pluginbuilderImageId, err)
+	case len(nk) == 0:
+		return "", fmt.Errorf("no tags available for %s", pluginbuilderImageId)
 	}
 	Logf(ctx, "% 16s: %s %s", "AVAILABLE", nakamaImageId, strings.Join(nk, ", "))
 	Logf(ctx, "% 16s: %s %s", "AVAILABLE", pluginbuilderImageId, strings.Join(pb, ", "))

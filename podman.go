@@ -65,6 +65,10 @@ func PodmanOpen(ctx context.Context) (context.Context, context.Context, error) {
 // AlwaysPull returns true.
 func PodmanPullImages(ctx context.Context, ids ...string) error {
 	for _, id := range ids {
+		// skip if localhost image
+		if strings.HasPrefix(id, "localhost/") {
+			continue
+		}
 		// skip if the image exists
 		if img, err := pimages.GetImage(ctx, id, nil); err == nil && !AlwaysPull(ctx) {
 			Logf(ctx, "% 16s: %s %s", "EXISTING", id, ShortId(img.ID))
