@@ -149,7 +149,7 @@ func New(ctx, conn context.Context, opts ...Option) {
 		select {
 		case <-ctx.Done():
 		case sig := <-ch:
-			Info(ctx).Str("sig", fmt.Sprintf("%s", sig)).Msg("signal")
+			Info(ctx).Str("sig", sig.String()).Msg("signal")
 			cancel()
 		}
 	}()

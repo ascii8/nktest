@@ -171,7 +171,7 @@ func (w *consoleWriter) Write(lines []byte) (int, error) {
 	now := time.Now()
 	// add timestamp to prefix, colorized
 	prefix := append(w.prefix, fmt.Sprintf("\x1b[%dm%v\x1b[0m", 90, now.Format(TimeFormatValue))+" "...)
-	for _, buf := range bytes.Split(lines, []byte{'\n'}) {
+	for i, buf := range bytes.Split(lines, []byte{'\n'}) {
 		if len(bytes.TrimSpace(buf)) == 0 {
 			continue
 		}
@@ -197,12 +197,15 @@ func (w *consoleWriter) Write(lines []byte) (int, error) {
 			}
 			v, err := json.Marshal(m)
 			if err != nil {
-				panic(err)
+				return 0, fmt.Errorf("line %d: %w", i, err)
 			}
-			_, _ = w.cw.Write(v)
+			_, err = w.cw.Write(v)
+			if err != nil {
+				return 0, fmt.Errorf("line %d: %w", i, err)
+			}
 			continue
 		}
-		_, _ = w.w.Write(
+		_, err := w.w.Write(
 			append(
 				prefix,
 				append(
@@ -215,6 +218,9 @@ func (w *consoleWriter) Write(lines []byte) (int, error) {
 				)...,
 			),
 		)
+		if err != nil {
+			return 0, fmt.Errorf("line %d: %w", i, err)
+		}
 	}
 	return len(lines), nil
 }
