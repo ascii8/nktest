@@ -25,7 +25,6 @@ import (
 )
 
 func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, initializer runtime.Initializer) error {
-	logger.Info("INIT NKSAMPLE")
 	if err := initializer.RegisterRpc("go_echo_sample", rpcEcho); err != nil {
 		return err
 	}
