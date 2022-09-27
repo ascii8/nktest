@@ -145,8 +145,8 @@ type consoleWriter struct {
 	prefix []byte
 }
 
-// ConsoleWriter creates a zerolog console writer.
-func ConsoleWriter(w, cw io.Writer, field, value string) io.Writer {
+// NewConsoleWriter creates a zerolog console writer.
+func NewConsoleWriter(w, cw io.Writer, field, value string) io.Writer {
 	return &consoleWriter{
 		w:      w,
 		cw:     cw,

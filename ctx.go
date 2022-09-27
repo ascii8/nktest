@@ -46,7 +46,7 @@ type contextKey int
 const (
 	stdoutKey contextKey = iota
 	loggerKey
-	coutKey
+	consoleWriterKey
 	httpClientKey
 	podmanConnKey
 	portMapKey
@@ -73,24 +73,10 @@ func WithStdout(parent context.Context, stdout io.Writer) context.Context {
 	return context.WithValue(parent, stdoutKey, stdout)
 }
 
-/*
-// WithStderr sets the stderr on the context.
-func WithStderr(parent context.Context, stderr io.Writer) context.Context {
-	return context.WithValue(parent, stderrKey, stderr)
+// WithConsoleWriter sets the console writer out on the context.
+func WithConsoleWriter(parent context.Context, consoleWriter io.Writer) context.Context {
+	return context.WithValue(parent, consoleWriterKey, consoleWriter)
 }
-*/
-
-// WithCout sets the console writer out on the context.
-func WithCout(parent context.Context, cout io.Writer) context.Context {
-	return context.WithValue(parent, coutKey, cout)
-}
-
-/*
-// WithCerr sets the console writer err on the context.
-func WithCerr(parent context.Context, cerr io.Writer) context.Context {
-	return context.WithValue(parent, cerrKey, cerr)
-}
-*/
 
 // WithHttpClient sets the http client used on the context. Used for generating
 // auth tokens for image repositories.

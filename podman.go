@@ -191,8 +191,8 @@ func PodmanRun(ctx context.Context, podId, id string, env map[string]string, mou
 func PodmanFollowLogs(ctx context.Context, id string) error {
 	go func() {
 		shortId := ShortId(id)
-		stdout := ConsoleWriter(Stdout(ctx), Cout(ctx), ContainerIdFieldName, shortId)
-		stderr := ConsoleWriter(Stdout(ctx), Cout(ctx), ContainerIdFieldName, shortId)
+		stdout := NewConsoleWriter(Stdout(ctx), ConsoleWriter(ctx), ContainerIdFieldName, shortId)
+		stderr := NewConsoleWriter(Stdout(ctx), ConsoleWriter(ctx), ContainerIdFieldName, shortId)
 		if err := pcontainers.Attach(ctx, id, nil, stdout, stderr, nil, &pcontainers.AttachOptions{}); err != nil {
 			Err(ctx, err).Str("short", shortId).Msg("unable to follow logs")
 		}

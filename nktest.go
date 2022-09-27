@@ -22,14 +22,14 @@ import (
 
 // globalCtx is the global context.
 var globalCtx struct {
-	stdout     io.Writer
-	cout       io.Writer
-	logger     zerolog.Logger
-	httpClient *http.Client
-	ctx        context.Context
-	conn       context.Context
-	cancel     context.CancelFunc
-	r          *Runner
+	w      io.Writer
+	cw     io.Writer
+	l      zerolog.Logger
+	cl     *http.Client
+	ctx    context.Context
+	conn   context.Context
+	cancel context.CancelFunc
+	r      *Runner
 }
 
 func init() {
@@ -46,6 +46,7 @@ func init() {
 
 // SetVerbose sets the global verbose value.
 func SetVerbose(verbose bool) {
+	// override field names to match nakama's logger (zap)
 	zerolog.TimestampFieldName = "ts"
 	zerolog.MessageFieldName = "msg"
 	stdout, transport := noop, DefaultTransport
@@ -58,67 +59,67 @@ func SetVerbose(verbose bool) {
 		)
 	}
 	// console writer
-	cout := zerolog.NewConsoleWriter(func(cw *zerolog.ConsoleWriter) {
+	cw := zerolog.NewConsoleWriter(func(cw *zerolog.ConsoleWriter) {
 		cw.Out = stdout
 		cw.TimeFormat = TimeFormatValue
 		cw.PartsOrder = []string{ContainerIdFieldName, "ts", "level", "caller", "msg"}
 		cw.FieldsExclude = []string{ContainerIdFieldName, "ts", "level", "caller", "msg"}
 	})
 	// globals
-	globalCtx.stdout = stdout
-	globalCtx.cout = ConsoleWriter(stdout, cout, ContainerIdFieldName, ContainerEmptyValue)
-	globalCtx.logger = zerolog.New(globalCtx.cout).With().Caller().Timestamp().Logger()
-	globalCtx.httpClient = &http.Client{
+	globalCtx.w = stdout
+	globalCtx.cw = NewConsoleWriter(stdout, cw, ContainerIdFieldName, ContainerEmptyValue)
+	globalCtx.l = zerolog.New(globalCtx.cw).With().Caller().Timestamp().Logger()
+	globalCtx.cl = &http.Client{
 		Transport: transport,
 	}
 }
 
 // Stdout returns the stdout from the context.
 func Stdout(ctx context.Context) io.Writer {
-	if stdout, ok := ctx.Value(stdoutKey).(io.Writer); ok {
-		return stdout
+	if w, ok := ctx.Value(stdoutKey).(io.Writer); ok {
+		return w
 	}
-	return globalCtx.stdout
+	return globalCtx.w
+}
+
+// ConsoleWriter returns the consoleWriter from the context.
+func ConsoleWriter(ctx context.Context) io.Writer {
+	if cw, ok := ctx.Value(consoleWriterKey).(io.Writer); ok {
+		return cw
+	}
+	return globalCtx.cw
 }
 
 // Logger returns the logger from the context.
 func Logger(ctx context.Context) zerolog.Logger {
-	if logger, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
-		return logger
+	if l, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return l
 	}
-	return globalCtx.logger
+	return globalCtx.l
 }
 
 // Info returns a info logger from the context.
 func Info(ctx context.Context) *zerolog.Event {
-	if logger, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
-		return logger.Info()
+	if l, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return l.Info()
 	}
-	return globalCtx.logger.Info()
+	return globalCtx.l.Info()
 }
 
 // Debug returns a debug logger from the context.
 func Debug(ctx context.Context) *zerolog.Event {
-	if logger, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
-		return logger.Debug()
+	if l, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return l.Debug()
 	}
-	return globalCtx.logger.Debug()
+	return globalCtx.l.Debug()
 }
 
 // Err returns a err logger from the context.
 func Err(ctx context.Context, err error) *zerolog.Event {
-	if logger, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
-		return logger.Err(err)
+	if l, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return l.Err(err)
 	}
-	return globalCtx.logger.Err(err)
-}
-
-// Cout returns the cout from the context.
-func Cout(ctx context.Context) io.Writer {
-	if cout, ok := ctx.Value(coutKey).(io.Writer); ok {
-		return cout
-	}
-	return globalCtx.cout
+	return globalCtx.l.Err(err)
 }
 
 // Transport creates a transport from the context.
@@ -132,10 +133,10 @@ func Transport(ctx context.Context, transport http.RoundTripper) http.RoundTripp
 
 // HttpClient returns the http client from the context.
 func HttpClient(ctx context.Context) *http.Client {
-	if httpClient, ok := ctx.Value(httpClientKey).(*http.Client); ok && httpClient != nil {
-		return httpClient
+	if cl, ok := ctx.Value(httpClientKey).(*http.Client); ok && cl != nil {
+		return cl
 	}
-	return globalCtx.httpClient
+	return globalCtx.cl
 }
 
 // New creates a new context.
