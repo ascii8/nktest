@@ -22,6 +22,12 @@ var ContainerEmptyValue = "--------"
 // TimeFormatValue is the time format.
 var TimeFormatValue = "2006-01-02 15:04:05"
 
+// NakamaCallerValue is the nakama caller value.
+var NakamaCallerValue = "nk"
+
+// NktestCallerValue is the nktest caller value.
+var NktestCallerValue = "nktest"
+
 // DefaultTranpsort is the default http transport.
 var DefaultTransport http.RoundTripper = &http.Transport{
 	DisableCompression: true,
@@ -172,6 +178,16 @@ func (w *consoleWriter) Write(lines []byte) (int, error) {
 			}
 			if _, ok := m[zerolog.TimestampFieldName]; !ok {
 				m[zerolog.TimestampFieldName] = now.Format(time.RFC3339)
+			}
+			cv, cok := m[zerolog.CallerFieldName]
+			rv, rok := m["runtime"]
+			cs, _ := cv.(string)
+			rs, _ := rv.(string)
+			switch {
+			case cok && (!rok || strings.HasPrefix(rs, "go1.")) && cs != NktestCallerValue:
+				m[zerolog.CallerFieldName] = NakamaCallerValue
+			case !cok:
+				m[zerolog.CallerFieldName] = NktestCallerValue
 			}
 			v, err := json.Marshal(m)
 			if err != nil {

@@ -152,7 +152,7 @@ func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string
 
 // PodmanRun runs a container image id.
 func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mounts []string, entrypoint ...string) (string, error) {
-	Info(ctx).Str("id", id).Msg("run")
+	Info(ctx).Str("id", id).Msg("creating container")
 	// create spec
 	s := pspecgen.NewSpecGenerator(id, false)
 	s.Remove = true
@@ -168,7 +168,6 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 	if err != nil {
 		return "", fmt.Errorf("unable to create %s: %w", id, err)
 	}
-	Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("created")
 	go func() {
 		<-ctx.Done()
 		Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("stopping")
@@ -183,7 +182,7 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 	if err := pcontainers.Start(ctx, res.ID, nil); err != nil {
 		return "", fmt.Errorf("unable to start %s %s: %w", id, ShortId(res.ID), err)
 	}
-	Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("running")
+	Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("container running")
 	return res.ID, nil
 }
 

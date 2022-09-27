@@ -189,9 +189,12 @@ func (r *Runner) Run(ctx context.Context) error {
 // BuildModules builds the nakama modules.
 func (r *Runner) BuildModules(ctx context.Context, id string) error {
 	for i, bc := range r.buildConfigs {
+		ctx, cancel := context.WithCancel(ctx)
 		if err := r.BuildModule(ctx, id, &bc); err != nil {
+			cancel()
 			return fmt.Errorf("unable to build module %d: %w", i, err)
 		}
+		cancel()
 	}
 	return nil
 }

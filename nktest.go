@@ -62,13 +62,13 @@ func SetVerbose(verbose bool) {
 	cw := zerolog.NewConsoleWriter(func(cw *zerolog.ConsoleWriter) {
 		cw.Out = stdout
 		cw.TimeFormat = TimeFormatValue
-		cw.PartsOrder = []string{ContainerIdFieldName, "ts", "level", "caller", "msg"}
-		cw.FieldsExclude = []string{ContainerIdFieldName, "ts", "level", "caller", "msg"}
+		cw.PartsOrder = []string{ContainerIdFieldName, zerolog.TimestampFieldName, zerolog.LevelFieldName, zerolog.CallerFieldName, zerolog.MessageFieldName}
+		cw.FieldsExclude = cw.PartsOrder
 	})
 	// globals
 	globalCtx.w = stdout
 	globalCtx.cw = NewConsoleWriter(stdout, cw, ContainerIdFieldName, ContainerEmptyValue)
-	globalCtx.l = zerolog.New(globalCtx.cw).With().Caller().Timestamp().Logger()
+	globalCtx.l = zerolog.New(globalCtx.cw).With().Timestamp().Logger()
 	globalCtx.cl = &http.Client{
 		Transport: transport,
 	}

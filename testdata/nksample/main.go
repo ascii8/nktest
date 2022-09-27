@@ -16,6 +16,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -55,9 +57,13 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 	return nil
 }
 
-func rpcEcho(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	logger.Info("RUNNING IN GO -- %s", payload)
-	return payload, nil
+func rpcEcho(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payloadstr string) (string, error) {
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(payloadstr), &payload); err != nil {
+		return "", fmt.Errorf("unable to unmarshal payload: %w", err)
+	}
+	logger.WithField("payload", payload).Info("rpcEcho")
+	return payloadstr, nil
 }
 
 func rpcCreateMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
