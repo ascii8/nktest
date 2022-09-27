@@ -71,10 +71,10 @@ func PodmanPullImages(ctx context.Context, ids ...string) error {
 		}
 		// skip if the image exists
 		if img, err := pimages.GetImage(ctx, id, nil); err == nil && !AlwaysPull(ctx) {
-			Info(ctx).Str("id", id).Str("short", ShortId(img.ID)).Msg("image exists")
+			Info(ctx).Str("id", id).Str("short", ShortId(img.ID)).Msg("container image exists")
 			continue
 		}
-		Info(ctx).Str("id", id).Msg("pulling")
+		Info(ctx).Str("id", id).Msg("pulling container image")
 		if _, err := pimages.Pull(ctx, id, new(pimages.PullOptions).WithQuiet(true)); err != nil {
 			return err
 		}
@@ -170,7 +170,7 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 	}
 	go func() {
 		<-ctx.Done()
-		Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("stopping")
+		Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("stopping container")
 		if err := pcontainers.Stop(
 			PodmanConn(ctx), res.ID,
 			new(pcontainers.StopOptions).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
@@ -193,7 +193,7 @@ func PodmanFollowLogs(ctx context.Context, id string) error {
 		stdout := NewConsoleWriter(Stdout(ctx), ConsoleWriter(ctx), ContainerIdFieldName, shortId)
 		stderr := NewConsoleWriter(Stdout(ctx), ConsoleWriter(ctx), ContainerIdFieldName, shortId)
 		if err := pcontainers.Attach(ctx, id, nil, stdout, stderr, nil, &pcontainers.AttachOptions{}); err != nil {
-			Err(ctx, err).Str("short", shortId).Msg("unable to follow logs")
+			Err(ctx, err).Str("short", shortId).Msg("unable to follow container logs")
 		}
 	}()
 	return nil
