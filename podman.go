@@ -151,18 +151,18 @@ func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string
 }
 
 // PodmanRun runs a container image id.
-func PodmanRun(ctx context.Context, podId, id string, env map[string]string, mounts []string, entrypoint ...string) (string, error) {
+func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mounts []string, entrypoint ...string) (string, error) {
 	Info(ctx).Str("id", id).Msg("run")
 	// create spec
 	s := pspecgen.NewSpecGenerator(id, false)
 	s.Remove = true
-	s.Entrypoint = entrypoint
-	s.Env = env
 	s.Pod = podId
+	s.Env = env
 	var err error
 	if s.Mounts, err = PodmanBuildMounts(mounts...); err != nil {
 		return "", err
 	}
+	s.Entrypoint = entrypoint
 	// create
 	res, err := pcontainers.CreateWithSpec(ctx, s, nil)
 	if err != nil {

@@ -92,10 +92,6 @@ func (r *Runner) init(ctx context.Context) error {
 	if r.podName == "" {
 		r.podName = ShortId(fmt.Sprintf("%x", md5.Sum([]byte(r.dir))))
 	}
-	// change to directory
-	if err := os.Chdir(r.dir); err != nil {
-		return fmt.Errorf("unable to change to working directory %s: %w", r.dir, err)
-	}
 	// set volume directory
 	if r.volumeDir == "" {
 		r.volumeDir = filepath.Join(r.dir, ".cache")
@@ -206,6 +202,9 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if bc.modulePath == "" {
 		return fmt.Errorf("must supply module path")
 	}
+	if strings.HasPrefix(bc.modulePath, "./") {
+		bc.modulePath = filepath.Join(r.dir, bc.modulePath)
+	}
 	dir, err := realpath.Realpath(bc.modulePath)
 	if err != nil {
 		return fmt.Errorf("unable to determine real path for %s: %w", dir, err)
@@ -245,8 +244,8 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	}
 	containerId, err := PodmanRun(
 		ctx,
-		r.podId,
 		id,
+		r.podId,
 		bc.env,
 		append(
 			bc.mounts,
@@ -288,8 +287,8 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 func (r *Runner) RunPostgres(ctx context.Context, id string) error {
 	containerId, err := PodmanRun(
 		ctx,
-		r.podId,
 		id,
+		r.podId,
 		map[string]string{
 			"listen_addresses":  "'*'",
 			"POSTGRES_PASSWORD": r.name,
@@ -321,8 +320,8 @@ func (r *Runner) RunPostgres(ctx context.Context, id string) error {
 func (r *Runner) RunNakama(ctx context.Context, id string) error {
 	containerId, err := PodmanRun(
 		ctx,
-		r.podId,
 		id,
+		r.podId,
 		nil,
 		[]string{
 			filepath.Join(r.volumeDir, "nakama") + ":/nakama/data",
