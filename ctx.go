@@ -45,7 +45,8 @@ type contextKey int
 // context keys.
 const (
 	stdoutKey contextKey = iota
-	stderrKey
+	loggerKey
+	coutKey
 	httpClientKey
 	podmanConnKey
 	portMapKey
@@ -72,10 +73,24 @@ func WithStdout(parent context.Context, stdout io.Writer) context.Context {
 	return context.WithValue(parent, stdoutKey, stdout)
 }
 
+/*
 // WithStderr sets the stderr on the context.
 func WithStderr(parent context.Context, stderr io.Writer) context.Context {
 	return context.WithValue(parent, stderrKey, stderr)
 }
+*/
+
+// WithCout sets the console writer out on the context.
+func WithCout(parent context.Context, cout io.Writer) context.Context {
+	return context.WithValue(parent, coutKey, cout)
+}
+
+/*
+// WithCerr sets the console writer err on the context.
+func WithCerr(parent context.Context, cerr io.Writer) context.Context {
+	return context.WithValue(parent, cerrKey, cerr)
+}
+*/
 
 // WithHttpClient sets the http client used on the context. Used for generating
 // auth tokens for image repositories.
@@ -339,7 +354,7 @@ func NakamaVersion(ctx context.Context) (string, error) {
 		return string(bytes.TrimSpace(ver)), nil
 	}
 	nakamaImageId, pluginbuilderImageId := NakamaImageId(ctx), PluginbuilderImageId(ctx)
-	Logf(ctx, "% 16s: %s, %s", "REFRESHING", nakamaImageId, pluginbuilderImageId)
+	Info(ctx).Str("nakama", nakamaImageId).Str("pluginbuilder", pluginbuilderImageId).Msg("refreshing")
 	// get nakama versions
 	nk, err := DockerImageTags(ctx, nakamaImageId)
 	switch {
@@ -356,8 +371,7 @@ func NakamaVersion(ctx context.Context) (string, error) {
 	case len(nk) == 0:
 		return "", fmt.Errorf("no tags available for %s", pluginbuilderImageId)
 	}
-	Logf(ctx, "% 16s: %s %s", "AVAILABLE", nakamaImageId, strings.Join(nk, ", "))
-	Logf(ctx, "% 16s: %s %s", "AVAILABLE", pluginbuilderImageId, strings.Join(pb, ", "))
+	Info(ctx).Strs("nakama", nk).Strs("pluginbuilder", pb).Msg("available")
 	// create map of pluginbuilder versions
 	m, re := make(map[string]bool), regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	for _, ver := range pb {

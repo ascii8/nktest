@@ -45,11 +45,11 @@ func PodmanOpen(ctx context.Context) (context.Context, context.Context, error) {
 				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), info.URI, info.Identity)
 			}
 			if err == nil {
+				ev := Info(ctx).Str("uri", info.URI)
 				if info.Identity != "" {
-					Logf(ctx, "% 16s: %s IDENTITY: %s", "PODMAN", info.URI, info.Identity)
-				} else {
-					Logf(ctx, "% 16s: %s", "PODMAN", info.URI)
+					ev = ev.Str("identity", info.Identity)
 				}
+				ev.Msg("podman")
 				ctx, _ := onecontext.Merge(ctx, conn)
 				return context.WithValue(ctx, podmanConnKey, conn), conn, nil
 			} else if firstErr == nil {
@@ -71,10 +71,10 @@ func PodmanPullImages(ctx context.Context, ids ...string) error {
 		}
 		// skip if the image exists
 		if img, err := pimages.GetImage(ctx, id, nil); err == nil && !AlwaysPull(ctx) {
-			Logf(ctx, "% 16s: %s %s", "EXISTING", id, ShortId(img.ID))
+			Info(ctx).Str("id", id).Str("short", ShortId(img.ID)).Msg("image exists")
 			continue
 		}
-		Logf(ctx, "% 16s: %s", "PULLING", id)
+		Info(ctx).Str("id", id).Msg("pulling")
 		if _, err := pimages.Pull(ctx, id, new(pimages.PullOptions).WithQuiet(true)); err != nil {
 			return err
 		}
@@ -90,9 +90,9 @@ func PodmanPodKill(ctx context.Context, name string) error {
 	}
 	for _, p := range res {
 		if p.Name == name {
-			Logf(ctx, "% 16s: %s %s", "STOPPING POD", name, ShortId(p.Id))
+			Info(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("stopping pod")
 			_, _ = ppods.Stop(ctx, p.Id, new(ppods.StopOptions).WithTimeout(int(PodRemoveTimeout(ctx))))
-			Logf(ctx, "% 16s: %s %s", "REMOVING POD", name, ShortId(p.Id))
+			Info(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("removing pod")
 			_, _ = ppods.Remove(ctx, p.Id, new(ppods.RemoveOptions).WithTimeout(uint(PodRemoveTimeout(ctx))))
 		}
 	}
@@ -152,7 +152,7 @@ func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string
 
 // PodmanRun runs a container image id.
 func PodmanRun(ctx context.Context, podId, id string, env map[string]string, mounts []string, entrypoint ...string) (string, error) {
-	Logf(ctx, "% 16s: %s", "RUN", id)
+	Info(ctx).Str("id", id).Msg("run")
 	// create spec
 	s := pspecgen.NewSpecGenerator(id, false)
 	s.Remove = true
@@ -168,22 +168,22 @@ func PodmanRun(ctx context.Context, podId, id string, env map[string]string, mou
 	if err != nil {
 		return "", fmt.Errorf("unable to create %s: %w", id, err)
 	}
-	Logf(ctx, "% 16s: %s %s", "CREATED", id, ShortId(res.ID))
+	Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("created")
 	go func() {
 		<-ctx.Done()
-		Logf(ctx, "% 16s: %s %s", "STOPPING", id, ShortId(res.ID))
+		Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("stopping")
 		if err := pcontainers.Stop(
 			PodmanConn(ctx), res.ID,
 			new(pcontainers.StopOptions).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
 		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) {
-			Errf(ctx, "unable to stop container %s %s: %v", id, ShortId(res.ID), err)
+			Err(ctx, err).Str("id", id).Str("short", ShortId(res.ID)).Msg("unable to stop container")
 		}
 	}()
 	// run
 	if err := pcontainers.Start(ctx, res.ID, nil); err != nil {
 		return "", fmt.Errorf("unable to start %s %s: %w", id, ShortId(res.ID), err)
 	}
-	Logf(ctx, "% 16s: %s %s", "RUNNING", id, ShortId(res.ID))
+	Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("running")
 	return res.ID, nil
 }
 
@@ -191,9 +191,10 @@ func PodmanRun(ctx context.Context, podId, id string, env map[string]string, mou
 func PodmanFollowLogs(ctx context.Context, id string) error {
 	go func() {
 		shortId := ShortId(id)
-		stdout, stderr := PrefixedWriter(Stdout(ctx), shortId+": "), PrefixedWriter(Stderr(ctx), shortId+": ")
+		stdout := ConsoleWriter(Stdout(ctx), Cout(ctx), ContainerIdFieldName, shortId)
+		stderr := ConsoleWriter(Stdout(ctx), Cout(ctx), ContainerIdFieldName, shortId)
 		if err := pcontainers.Attach(ctx, id, nil, stdout, stderr, nil, &pcontainers.AttachOptions{}); err != nil {
-			Errf(ctx, "unable to get logs for %s: %v", shortId, err)
+			Err(ctx, err).Str("short", shortId).Msg("unable to follow logs")
 		}
 	}()
 	return nil
@@ -285,10 +286,10 @@ func QualifiedId(id string) string {
 
 // ShortId truncates id to 16 characters.
 func ShortId(id string) string {
-	if len(id) < 16 {
+	if len(id) < 8 {
 		return id
 	}
-	return id[:16]
+	return id[:8]
 }
 
 // ParsePortMapping creates a port mapping from s.

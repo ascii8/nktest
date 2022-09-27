@@ -16,13 +16,15 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/rs/zerolog"
 	"github.com/teivah/onecontext"
 )
 
 // globalCtx is the global context.
 var globalCtx struct {
 	stdout     io.Writer
-	stderr     io.Writer
+	cout       io.Writer
+	logger     zerolog.Logger
 	httpClient *http.Client
 	ctx        context.Context
 	conn       context.Context
@@ -44,18 +46,28 @@ func init() {
 
 // SetVerbose sets the global verbose value.
 func SetVerbose(verbose bool) {
-	stdout, stderr, transport := noop, noop, DefaultTransport
+	zerolog.TimestampFieldName = "ts"
+	zerolog.MessageFieldName = "msg"
+	stdout, transport := noop, DefaultTransport
 	if verbose {
 		stdout = os.Stdout
-		stderr = os.Stderr
 		transport = NewRoundTripper(
 			PrefixedWriter(stdout, strings.Repeat(" ", 18-len(DefaultPrefixOut))+DefaultPrefixOut),
-			PrefixedWriter(stderr, strings.Repeat(" ", 18-len(DefaultPrefixIn))+DefaultPrefixIn),
+			PrefixedWriter(stdout, strings.Repeat(" ", 18-len(DefaultPrefixIn))+DefaultPrefixIn),
 			transport,
 		)
 	}
+	// console writer
+	cout := zerolog.NewConsoleWriter(func(cw *zerolog.ConsoleWriter) {
+		cw.Out = stdout
+		cw.TimeFormat = TimeFormatValue
+		cw.PartsOrder = []string{ContainerIdFieldName, "ts", "level", "caller", "msg"}
+		cw.FieldsExclude = []string{ContainerIdFieldName, "ts", "level", "caller", "msg"}
+	})
+	// globals
 	globalCtx.stdout = stdout
-	globalCtx.stderr = stderr
+	globalCtx.cout = ConsoleWriter(stdout, cout, ContainerIdFieldName, ContainerEmptyValue)
+	globalCtx.logger = zerolog.New(globalCtx.cout).With().Caller().Timestamp().Logger()
 	globalCtx.httpClient = &http.Client{
 		Transport: transport,
 	}
@@ -69,22 +81,44 @@ func Stdout(ctx context.Context) io.Writer {
 	return globalCtx.stdout
 }
 
-// Stderr returns the stderr from the context.
-func Stderr(ctx context.Context) io.Writer {
-	if stderr, ok := ctx.Value(stderrKey).(io.Writer); ok {
-		return stderr
+// Logger returns the logger from the context.
+func Logger(ctx context.Context) zerolog.Logger {
+	if logger, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return logger
 	}
-	return globalCtx.stderr
+	return globalCtx.logger
 }
 
-// Logf logs a message to the context's stdout.
-func Logf(ctx context.Context, s string, v ...interface{}) {
-	fmt.Fprintf(Stdout(ctx), strings.TrimRight(s, "\n")+"\n", v...)
+// Info returns a info logger from the context.
+func Info(ctx context.Context) *zerolog.Event {
+	if logger, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return logger.Info()
+	}
+	return globalCtx.logger.Info()
 }
 
-// Errf logs a message to the context's stderr.
-func Errf(ctx context.Context, s string, v ...interface{}) {
-	fmt.Fprintf(Stderr(ctx), strings.TrimRight(s, "\n")+"\n", v...)
+// Debug returns a debug logger from the context.
+func Debug(ctx context.Context) *zerolog.Event {
+	if logger, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return logger.Debug()
+	}
+	return globalCtx.logger.Debug()
+}
+
+// Err returns a err logger from the context.
+func Err(ctx context.Context, err error) *zerolog.Event {
+	if logger, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return logger.Err(err)
+	}
+	return globalCtx.logger.Err(err)
+}
+
+// Cout returns the cout from the context.
+func Cout(ctx context.Context) io.Writer {
+	if cout, ok := ctx.Value(coutKey).(io.Writer); ok {
+		return cout
+	}
+	return globalCtx.cout
 }
 
 // Transport creates a transport from the context.
@@ -114,7 +148,7 @@ func New(ctx, conn context.Context, opts ...Option) {
 		select {
 		case <-ctx.Done():
 		case sig := <-ch:
-			Logf(ctx, "% 16s: %s", "SIGNAL", sig)
+			Info(ctx).Str("sig", fmt.Sprintf("%s", sig)).Msg("signal")
 			cancel()
 		}
 	}()
@@ -136,10 +170,7 @@ func Cancel() error {
 // WithCancel creates a new context for use within Test* funcs.
 func WithCancel(parent context.Context, t TestLogger) (context.Context, context.CancelFunc, *Runner) {
 	ctx, cancel := onecontext.Merge(globalCtx.ctx, parent)
-	w := logWriter(t.Logf)
-	ctx = WithStdout(ctx, w)
-	ctx = WithStderr(ctx, w)
-	return ctx, cancel, globalCtx.r
+	return WithStdout(ctx, logWriter(t.Logf)), cancel, globalCtx.r
 }
 
 // Main is the main entry point that should be called from TestMain.

@@ -2,11 +2,25 @@ package nktest
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"time"
+
+	"github.com/rs/zerolog"
 )
+
+// ContainerIdFieldName is the container field name used for logs.
+var ContainerIdFieldName = "container_id"
+
+// ContainerEmptyValue is the container empty value.
+var ContainerEmptyValue = "--------"
+
+// TimeFormatValue is the time format.
+var TimeFormatValue = "2006-01-02 15:04:05"
 
 // DefaultTranpsort is the default http transport.
 var DefaultTransport http.RoundTripper = &http.Transport{
@@ -121,3 +135,64 @@ func NoopWriter() io.Writer {
 
 // noop is the noop writer.
 var noop io.Writer = &noopWriter{}
+
+// consoleWriter writes to a zerolog console.
+type consoleWriter struct {
+	w      io.Writer
+	cw     io.Writer
+	field  string
+	value  string
+	prefix []byte
+}
+
+// ConsoleWriter creates a zerolog console writer.
+func ConsoleWriter(w, cw io.Writer, field, value string) io.Writer {
+	return &consoleWriter{
+		w:      w,
+		cw:     cw,
+		field:  field,
+		value:  value,
+		prefix: []byte(value + " "),
+	}
+}
+
+// Write satisfies the io.Writer interface.
+func (w *consoleWriter) Write(lines []byte) (int, error) {
+	now := time.Now()
+	// add timestamp to prefix, colorized
+	prefix := append(w.prefix, fmt.Sprintf("\x1b[%dm%v\x1b[0m", 90, now.Format(TimeFormatValue))+" "...)
+	for _, buf := range bytes.Split(lines, []byte{'\n'}) {
+		if len(bytes.TrimSpace(buf)) == 0 {
+			continue
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal(buf, &m); err == nil && len(buf) != 0 && buf[0] == '{' {
+			if _, ok := m[w.field]; !ok {
+				m[w.field] = w.value
+			}
+			if _, ok := m[zerolog.TimestampFieldName]; !ok {
+				m[zerolog.TimestampFieldName] = now.Format(time.RFC3339)
+			}
+			v, err := json.Marshal(m)
+			if err != nil {
+				panic(err)
+			}
+			_, _ = w.cw.Write(v)
+			continue
+		}
+		_, _ = w.w.Write(
+			append(
+				prefix,
+				append(
+					bytes.ReplaceAll(
+						bytes.TrimRight(buf, "\r\n"),
+						[]byte{'\n'},
+						append([]byte{'\n'}, prefix...),
+					),
+					'\n',
+				)...,
+			),
+		)
+	}
+	return len(lines), nil
+}

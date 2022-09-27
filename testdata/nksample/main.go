@@ -56,7 +56,7 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 }
 
 func rpcEcho(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	logger.Info("RUNNING IN GO -- %q", payload)
+	logger.Info("RUNNING IN GO -- %s", payload)
 	return payload, nil
 }
 

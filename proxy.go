@@ -87,30 +87,25 @@ func (p *Proxy) Addr() string {
 	return p.addr
 }
 
-// InternalError handles internal errors.
-func (p Proxy) InternalError(ctx context.Context, res http.ResponseWriter, s string, v ...interface{}) {
-	s = fmt.Sprintf(s, v...)
-	Logf(ctx, s)
-	http.Error(res, s, http.StatusInternalServerError)
-}
-
 func (p Proxy) DialError(ctx context.Context, inWriter io.Writer, w http.ResponseWriter, req *http.Request, res *http.Response, err error) {
-	Logf(ctx, "% 16s: %v", "WS DIAL ERROR", err)
+	Err(ctx, err).Msg("ws dial error")
 	if res == nil {
 		return
 	}
 	defer res.Body.Close()
-	Errf(ctx, "% 16s: %d %s", "WS DIAL ERROR STATUS", res.StatusCode, http.StatusText(res.StatusCode))
+	Info(ctx).Int("code", res.StatusCode).Str("status", http.StatusText(res.StatusCode)).Msg("ws dial error status")
 	body, err := httputil.DumpResponse(res, true)
 	if err != nil {
-		p.InternalError(ctx, w, "WS DIAL ERROR: %v", err)
+		Err(ctx, err).Msg("ws dial error: unable to dump response")
+		http.Error(w, fmt.Sprintf("ws dial error: unable to dump response: %v", err), http.StatusInternalServerError)
 		return
 	}
 	_, _ = inWriter.Write(body)
 	// read body
 	buf, err := io.ReadAll(res.Body)
 	if err != nil {
-		p.InternalError(ctx, w, "WS DIAL ERROR: unable to read body: %v", err)
+		Err(ctx, err).Msg("ws dial error: unable to read body")
+		http.Error(w, fmt.Sprintf("ws dial error: unable to read body: %v", err), http.StatusInternalServerError)
 		return
 	}
 	// emit
@@ -124,11 +119,13 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 	mux := http.NewServeMux()
 	// proxy websockets
 	mux.HandleFunc(p.wsPath, func(w http.ResponseWriter, req *http.Request) {
-		Logf(ctx, "% 16s: %s", "WS OPEN", req.RemoteAddr)
+		logger := Logger(ctx).With().Str("remote", req.RemoteAddr).Logger()
+		logger.Info().Msg("ws open")
 		// dump request
 		buf, err := httputil.DumpRequest(req, true)
 		if err != nil {
-			p.InternalError(ctx, w, "WS ERROR: %v", err)
+			logger.Err(err).Msg("unable to dump request")
+			http.Error(w, fmt.Sprintf("ws error: unable to dump request: %v", err), http.StatusInternalServerError)
 			return
 		}
 		_, _ = outWriter.Write(buf)
@@ -142,7 +139,7 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 			header.Set("Authorization", s)
 		}
 		// connect outgoing websocket
-		Logf(ctx, "% 16s: %s", "WS DIAL", urlstr)
+		Info(ctx).Str("url", urlstr).Msg("ws dial")
 		out, pres, err := p.dialer.DialContext(ctx, urlstr, header)
 		if err != nil {
 			p.DialError(ctx, inWriter, w, req, pres, err)
@@ -153,17 +150,18 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 		// upgrade incoming websocket
 		in, err := p.upgrader.Upgrade(w, req, nil)
 		if err != nil {
-			p.InternalError(ctx, w, "WS UPGRADE ERROR: could not upgrade websocket %s: %v", req.RemoteAddr, err)
+			logger.Err(err).Msg("could not upgrade websocket")
+			http.Error(w, fmt.Sprintf("ws upgrade error: could not upgrade websocket %s: %v", req.RemoteAddr, err), http.StatusInternalServerError)
 			return
 		}
 		defer in.Close()
-		Logf(ctx, "% 16s: %s", "WS UPGRADED", req.RemoteAddr)
+		logger.Info().Msg("ws upgraded")
 		errc := make(chan error, 1)
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		go p.ws(ctx, outWriter, in, out, errc)
 		go p.ws(ctx, inWriter, out, in, errc)
-		Logf(ctx, "% 16s: %s %v", "WS CLOSE", req.RemoteAddr, <-errc)
+		logger.Err(<-errc).Msg("ws close")
 	})
 	// proxy anything else
 	prox := httputil.NewSingleHostReverseProxy(&url.URL{

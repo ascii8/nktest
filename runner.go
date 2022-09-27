@@ -153,7 +153,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	Logf(ctx, "% 16s: %s", "NAKAMA VERSION", nakamaVersion)
+	Info(ctx).Str("version", nakamaVersion).Msg("nakama")
 	qualifiedPostgresId := QualifiedId(postgresImageId + ":" + postgresVersion)
 	qualifiedPluginbuilderId := QualifiedId(pluginbuilderImageId + ":" + nakamaVersion)
 	qualifiedNakamaId := QualifiedId(nakamaImageId + ":" + nakamaVersion)
@@ -280,7 +280,7 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if rel, err := filepath.Rel(r.wd, out); err == nil {
 		out = "./" + rel
 	}
-	Logf(ctx, "% 16s: %s %d", "BUILT", out, fi.Size())
+	Info(ctx).Str("out", out).Int64("size", fi.Size()).Msg("built")
 	return nil
 }
 
