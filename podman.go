@@ -42,7 +42,7 @@ func PodmanOpen(ctx context.Context) (context.Context, context.Context, error) {
 			if info.Identity == "" {
 				conn, err = pbindings.NewConnection(context.Background(), info.URI)
 			} else {
-				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), info.URI, info.Identity)
+				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), info.URI, info.Identity, info.Insecure)
 			}
 			if err == nil {
 				ev := Info(ctx).Str("uri", info.URI)
@@ -362,4 +362,5 @@ type PodmanConnInfo struct {
 	URI      string `json:"URI"`
 	Identity string `json:"Identity"`
 	Default  bool   `json:"Default"`
+	Insecure bool   `json:"Insecure"`
 }
