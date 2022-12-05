@@ -1,10 +1,7 @@
 name: Test
 env:
   PODMAN_HOST: tcp://127.0.0.1:3333
-on:
-  push:
-    branch:
-      - master
+on: push
 jobs:
   test:
     runs-on: ubuntu-latest
