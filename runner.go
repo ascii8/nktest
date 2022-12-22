@@ -305,11 +305,9 @@ func (r *Runner) RunPostgres(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("unable to run %s: %w", id, err)
 	}
-	/*
-		if err := PodmanFollowLogs(ctx, containerId); err != nil {
-			return err
-		}
-	*/
+	if err := PodmanFollowLogs(ctx, containerId); err != nil {
+		return err
+	}
 	if err := PodmanServiceWait(ctx, r.podId, "5432/tcp", func(local, remote string) error {
 		r.postgresLocal = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", r.name, r.name, local, r.name)
 		r.postgresRemote = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", r.name, r.name, remote, r.name)

@@ -37,12 +37,16 @@ func PodmanOpen(ctx context.Context) (context.Context, context.Context, error) {
 		}
 		var firstErr error
 		for _, info := range infos {
+			urlstr := info.URI
+			if strings.HasPrefix(urlstr, "/") {
+				urlstr = "unix://" + urlstr
+			}
 			var conn context.Context
 			var err error
 			if info.Identity == "" {
-				conn, err = pbindings.NewConnection(context.Background(), info.URI)
+				conn, err = pbindings.NewConnection(context.Background(), urlstr)
 			} else {
-				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), info.URI, info.Identity, info.Insecure)
+				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), urlstr, info.Identity, info.Insecure)
 			}
 			if err == nil {
 				ev := Info(ctx).Str("uri", info.URI)

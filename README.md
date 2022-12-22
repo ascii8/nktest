@@ -158,4 +158,7 @@ podman machine stop podman-machine-default
 podman machine rm podman-machine-default
 podman machine init -v $HOME:$HOME
 podman machine start
+
+# if receiving a "too many open files" error on M1 macs, try:
+podman machine stop && ulimit -n unlimited && podman machine start
 ```
