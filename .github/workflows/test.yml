@@ -11,7 +11,7 @@ jobs:
       - name: setup dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgpgme-dev libbtrfs-dev libdevmapper-dev
+          sudo apt-get install -y libgpgme-dev
       - name: setup podman
         run: |
           curl -fsSL -o podman-linux-amd64.tar.gz https://github.com/mgoltzsche/podman-static/releases/latest/download/podman-linux-amd64.tar.gz
@@ -29,4 +29,4 @@ jobs:
           go-version: 1.19.x
       - name: test
         run: |
-          go test -v
+          go test -v -tags 'exclude_graphdriver_devicemapper exclude_graphdriver_btrfs'
