@@ -49,7 +49,7 @@ func PodmanOpen(ctx context.Context) (context.Context, context.Context, error) {
 				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), urlstr, info.Identity, info.Insecure)
 			}
 			if err == nil {
-				ev := Info(ctx).Str("uri", info.URI)
+				ev := Trace(ctx).Str("uri", info.URI)
 				if info.Identity != "" {
 					ev = ev.Str("identity", info.Identity)
 				}
@@ -75,10 +75,10 @@ func PodmanPullImages(ctx context.Context, ids ...string) error {
 		}
 		// skip if the image exists
 		if img, err := pimages.GetImage(ctx, id, nil); err == nil && !AlwaysPull(ctx) {
-			Info(ctx).Str("id", id).Str("short", ShortId(img.ID)).Msg("container image exists")
+			Trace(ctx).Str("id", id).Str("short", ShortId(img.ID)).Msg("container image exists")
 			continue
 		}
-		Info(ctx).Str("id", id).Msg("pulling container image")
+		Trace(ctx).Str("id", id).Msg("pulling container image")
 		if _, err := pimages.Pull(ctx, id, new(pimages.PullOptions).WithQuiet(true)); err != nil {
 			return err
 		}
@@ -94,9 +94,9 @@ func PodmanPodKill(ctx context.Context, name string) error {
 	}
 	for _, p := range res {
 		if p.Name == name {
-			Info(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("stopping pod")
+			Trace(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("stopping pod")
 			_, _ = ppods.Stop(ctx, p.Id, new(ppods.StopOptions).WithTimeout(int(PodRemoveTimeout(ctx))))
-			Info(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("removing pod")
+			Trace(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("removing pod")
 			_, _ = ppods.Remove(ctx, p.Id, new(ppods.RemoveOptions).WithTimeout(uint(PodRemoveTimeout(ctx))))
 		}
 	}
@@ -156,7 +156,7 @@ func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string
 
 // PodmanRun runs a container image id.
 func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mounts []string, entrypoint ...string) (string, error) {
-	Info(ctx).Str("id", id).Msg("creating container")
+	Trace(ctx).Str("id", id).Msg("creating container")
 	// create spec
 	s := pspecgen.NewSpecGenerator(id, false)
 	s.Remove = true
@@ -174,7 +174,7 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 	}
 	go func() {
 		<-ctx.Done()
-		Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("stopping container")
+		Trace(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("stopping container")
 		if err := pcontainers.Stop(
 			PodmanConn(ctx), res.ID,
 			new(pcontainers.StopOptions).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
@@ -186,16 +186,16 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 	if err := pcontainers.Start(ctx, res.ID, nil); err != nil {
 		return "", fmt.Errorf("unable to start %s %s: %w", id, ShortId(res.ID), err)
 	}
-	Info(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("container running")
+	Trace(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("container running")
 	return res.ID, nil
 }
 
 // PodmanFollowLogs follows the logs for a container.
-func PodmanFollowLogs(ctx context.Context, id string) error {
+func PodmanFollowLogs(ctx context.Context, id, shortName string) error {
 	go func() {
 		shortId := ShortId(id)
-		stdout := NewConsoleWriter(Stdout(ctx), ConsoleWriter(ctx), ContainerIdFieldName, shortId)
-		stderr := NewConsoleWriter(Stdout(ctx), ConsoleWriter(ctx), ContainerIdFieldName, shortId)
+		stdout := NewConsoleWriter(ConsoleWriter(ctx), ContainerIdFieldName, shortId, shortName)
+		stderr := NewConsoleWriter(ConsoleWriter(ctx), ContainerIdFieldName, shortId, shortName)
 		if err := pcontainers.Attach(ctx, id, nil, stdout, stderr, nil, &pcontainers.AttachOptions{}); err != nil {
 			Err(ctx, err).Str("short", shortId).Msg("unable to follow container logs")
 		}

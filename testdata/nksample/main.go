@@ -49,7 +49,7 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		return err
 	}
 	if err := initializer.RegisterEvent(func(ctx context.Context, logger runtime.Logger, evt *api.Event) {
-		logger.Info("Received event: %+v", evt)
+		logger.Debug("Received event: %+v", evt)
 	}); err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func rpcEcho(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.
 	if err := json.Unmarshal([]byte(payloadstr), &payload); err != nil {
 		return "", fmt.Errorf("unable to unmarshal payload: %w", err)
 	}
-	logger.WithField("payload", payload).Info("rpcEcho")
+	logger.WithField("payload", payload).Debug("rpcEcho")
 	return payloadstr, nil
 }
 

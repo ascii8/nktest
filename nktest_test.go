@@ -17,7 +17,9 @@ func TestMain(m *testing.M) {
 	ctx := context.Background()
 	ctx = WithAlwaysPullFromEnv(ctx, "PULL")
 	ctx = WithHostPortMap(ctx)
-	Main(ctx, m,
+	Main(
+		ctx,
+		m,
 		WithDir("./testdata"),
 		WithBuildConfig("./nksample", WithDefaultGoEnv(), WithDefaultGoVolumes()),
 	)

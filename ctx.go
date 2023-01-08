@@ -340,7 +340,7 @@ func NakamaVersion(ctx context.Context) (string, error) {
 		return string(bytes.TrimSpace(ver)), nil
 	}
 	nakamaImageId, pluginbuilderImageId := NakamaImageId(ctx), PluginbuilderImageId(ctx)
-	Info(ctx).Str("nakama", nakamaImageId).Str("pluginbuilder", pluginbuilderImageId).Msg("refreshing")
+	Trace(ctx).Str("nakama", nakamaImageId).Str("pluginbuilder", pluginbuilderImageId).Msg("refreshing")
 	// get nakama versions
 	nk, err := DockerImageTags(ctx, nakamaImageId)
 	switch {
@@ -357,7 +357,7 @@ func NakamaVersion(ctx context.Context) (string, error) {
 	case len(nk) == 0:
 		return "", fmt.Errorf("no tags available for %s", pluginbuilderImageId)
 	}
-	Info(ctx).Strs("nakama", nk).Strs("pluginbuilder", pb).Msg("available")
+	Trace(ctx).Strs("nakama", nk).Strs("pluginbuilder", pb).Msg("available")
 	// create map of pluginbuilder versions
 	m, re := make(map[string]bool), regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	for _, ver := range pb {

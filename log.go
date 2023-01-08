@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,15 +23,17 @@ var ContainerEmptyValue = "--------"
 // TimeFormatValue is the time format.
 var TimeFormatValue = "2006-01-02 15:04:05"
 
-// NakamaCallerValue is the nakama caller value.
-var NakamaCallerValue = "nk"
+// NakamaContainerShortName is the nakama short name.
+var NakamaContainerShortName = "nk"
 
-// NktestCallerValue is the nktest caller value.
-var NktestCallerValue = "nktest"
+// NktestRunnerShortName is the nktest short name.
+var NktestRunnerShortName = "xx"
 
-// ReplaceCallerField controls replacing caller field information. Set to false
-// when trying to debug nakama itself.
-var ReplaceCallerField = true
+// NakamaBuilderContainerShortName is the nakama builder short name.
+var NakamaBuilderContainerShortName = "bd"
+
+// PostgresContainerShortName is the postgres short name.
+var PostgresContainerShortName = "pg"
 
 // DefaultTranpsort is the default http transport.
 var DefaultTransport http.RoundTripper = &http.Transport{
@@ -148,79 +151,97 @@ var noop io.Writer = &noopWriter{}
 
 // consoleWriter writes to a zerolog console.
 type consoleWriter struct {
-	w      io.Writer
-	cw     io.Writer
-	field  string
-	value  string
-	prefix []byte
+	w         io.Writer
+	field     string
+	shortId   string
+	shortName string
 }
 
 // NewConsoleWriter creates a zerolog console writer.
-func NewConsoleWriter(w, cw io.Writer, field, value string) io.Writer {
+func NewConsoleWriter(w io.Writer, field, shortId, shortName string) io.Writer {
 	return &consoleWriter{
-		w:      w,
-		cw:     cw,
-		field:  field,
-		value:  value,
-		prefix: []byte(value + " "),
+		w:         w,
+		field:     field,
+		shortId:   shortId,
+		shortName: shortName,
 	}
 }
 
 // Write satisfies the io.Writer interface.
 func (w *consoleWriter) Write(lines []byte) (int, error) {
 	now := time.Now()
-	// add timestamp to prefix, colorized
-	prefix := append(w.prefix, fmt.Sprintf("\x1b[%dm%v\x1b[0m", 90, now.Format(TimeFormatValue))+" "...)
 	for i, buf := range bytes.Split(lines, []byte{'\n'}) {
 		if len(bytes.TrimSpace(buf)) == 0 {
 			continue
 		}
-		var m map[string]interface{}
+		m := make(map[string]interface{})
 		if err := json.Unmarshal(buf, &m); err == nil && len(buf) != 0 && buf[0] == '{' {
 			if _, ok := m[w.field]; !ok {
-				m[w.field] = w.value
+				m[w.field] = w.shortId
 			}
-			if _, ok := m[zerolog.TimestampFieldName]; !ok {
-				m[zerolog.TimestampFieldName] = now.Format(time.RFC3339)
-			}
-			if ReplaceCallerField {
-				cv, cok := m[zerolog.CallerFieldName]
-				rv, rok := m["runtime"]
-				cs, _ := cv.(string)
-				rs, _ := rv.(string)
-				switch {
-				case cok && (!rok || strings.HasPrefix(rs, "go1.")) && cs != NktestCallerValue:
-					m[zerolog.CallerFieldName] = NakamaCallerValue
-				case !cok:
-					m[zerolog.CallerFieldName] = NktestCallerValue
+			_, cok := m[zerolog.CallerFieldName]
+			rv, rok := m["runtime"]
+			rs, _ := rv.(string)
+			if cok && (!rok || strings.HasPrefix(rs, "go1.")) && w.shortName == NakamaContainerShortName {
+				m[zerolog.CallerFieldName] = w.shortName
+				// decrease level
+				if lv, ok := m[zerolog.LevelFieldName]; ok {
+					ls, _ := lv.(string)
+					l, err := zerolog.ParseLevel(ls)
+					if err != nil {
+						l = zerolog.DebugLevel
+					}
+					m[zerolog.LevelFieldName] = minLevel(l).String()
 				}
 			}
+		} else {
+			m[w.field] = w.shortId
+			s := string(buf)
+			if w.shortName == PostgresContainerShortName {
+				s = logRE.ReplaceAllString(s, "")
+			}
+			m[zerolog.MessageFieldName] = s
+		}
+		// make sure fields set
+		if _, ok := m[zerolog.TimestampFieldName]; !ok {
+			m[zerolog.TimestampFieldName] = now.Format(time.RFC3339)
+		}
+		if _, ok := m[zerolog.CallerFieldName]; !ok {
+			m[zerolog.CallerFieldName] = w.shortName
+		}
+		if _, ok := m[zerolog.LevelFieldName]; !ok {
+			m[zerolog.LevelFieldName] = zerolog.TraceLevel.String()
+		}
+		// determine the level
+		lv, _ := m[zerolog.LevelFieldName]
+		ls, _ := lv.(string)
+		level, err := zerolog.ParseLevel(ls)
+		if err != nil {
+			level = zerolog.TraceLevel
+		}
+		if level >= zerolog.GlobalLevel() {
 			v, err := json.Marshal(m)
 			if err != nil {
 				return 0, fmt.Errorf("line %d: %w", i, err)
 			}
-			_, err = w.cw.Write(v)
+			_, err = w.w.Write(v)
 			if err != nil {
 				return 0, fmt.Errorf("line %d: %w", i, err)
 			}
-			continue
-		}
-		_, err := w.w.Write(
-			append(
-				prefix,
-				append(
-					bytes.ReplaceAll(
-						bytes.TrimRight(buf, "\r\n"),
-						[]byte{'\n'},
-						append([]byte{'\n'}, prefix...),
-					),
-					'\n',
-				)...,
-			),
-		)
-		if err != nil {
-			return 0, fmt.Errorf("line %d: %w", i, err)
 		}
 	}
 	return len(lines), nil
+}
+
+// logRE matches postgres log lines.
+//
+// postgres log levels: DEBUG5, DEBUG4, DEBUG3, DEBUG2, DEBUG1, INFO, NOTICE, WARNING, ERROR, LOG, FATAL, and PANIC
+var logRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+ UTC \[\d+\] (INFO|NOTICE|WARNING|ERROR|LOG|FATAL|PANIC|DEBUG[1-5]):\s+`)
+
+// minLevel returns the minimum zerolog level.
+func minLevel(a zerolog.Level) zerolog.Level {
+	if a > zerolog.InfoLevel {
+		return a
+	}
+	return zerolog.TraceLevel
 }

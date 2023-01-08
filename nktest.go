@@ -33,24 +33,39 @@ var globalCtx struct {
 }
 
 func init() {
-	// determine if test
-	verbose := false
-	for _, s := range os.Args {
-		if s == "-test.v=true" {
-			verbose = true
-			break
+	level := zerolog.Disabled
+	// determine log level
+	if s := os.Getenv("LEVEL"); s != "" {
+		if l, err := zerolog.ParseLevel(s); err == nil {
+			level = l
 		}
 	}
-	SetVerbose(verbose)
+	if s := os.Getenv("DEBUG"); s != "" && s != "0" && s != "off" && s != "false" {
+		level = zerolog.DebugLevel
+	}
+	if s := os.Getenv("TRACE"); s != "" && s != "0" && s != "off" && s != "false" {
+		level = zerolog.TraceLevel
+	}
+	// when go test -v
+	if level == zerolog.Disabled {
+		for _, s := range os.Args {
+			if s == "-test.v=true" {
+				level = zerolog.InfoLevel
+				break
+			}
+		}
+	}
+	SetLevel(level)
 }
 
-// SetVerbose sets the global verbose value.
-func SetVerbose(verbose bool) {
+// SetLevel sets the global log level.
+func SetLevel(level zerolog.Level) {
 	// override field names to match nakama's logger (zap)
 	zerolog.TimestampFieldName = "ts"
 	zerolog.MessageFieldName = "msg"
+	zerolog.SetGlobalLevel(level)
 	stdout, transport := noop, DefaultTransport
-	if verbose {
+	if level < zerolog.Disabled {
 		stdout = os.Stdout
 		transport = NewRoundTripper(
 			PrefixedWriter(stdout, strings.Repeat(" ", 18-len(DefaultPrefixOut))+DefaultPrefixOut),
@@ -67,7 +82,7 @@ func SetVerbose(verbose bool) {
 	})
 	// globals
 	globalCtx.w = stdout
-	globalCtx.cw = NewConsoleWriter(stdout, cw, ContainerIdFieldName, ContainerEmptyValue)
+	globalCtx.cw = NewConsoleWriter(cw, ContainerIdFieldName, ContainerEmptyValue, NktestRunnerShortName)
 	globalCtx.l = zerolog.New(globalCtx.cw).With().Timestamp().Logger()
 	globalCtx.cl = &http.Client{
 		Transport: transport,
@@ -114,6 +129,14 @@ func Debug(ctx context.Context) *zerolog.Event {
 	return globalCtx.l.Debug()
 }
 
+// Trace returns a trace logger from the context.
+func Trace(ctx context.Context) *zerolog.Event {
+	if l, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
+		return l.Trace()
+	}
+	return globalCtx.l.Trace()
+}
+
 // Err returns a err logger from the context.
 func Err(ctx context.Context, err error) *zerolog.Event {
 	if l, ok := ctx.Value(loggerKey).(zerolog.Logger); ok {
@@ -149,7 +172,7 @@ func New(ctx, conn context.Context, opts ...Option) {
 		select {
 		case <-ctx.Done():
 		case sig := <-ch:
-			Info(ctx).Str("sig", sig.String()).Msg("signal")
+			Trace(ctx).Str("sig", sig.String()).Msg("signal")
 			cancel()
 		}
 	}()

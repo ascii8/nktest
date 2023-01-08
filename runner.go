@@ -149,7 +149,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	Info(ctx).Str("version", nakamaVersion).Msg("nakama")
+	Trace(ctx).Str("version", nakamaVersion).Msg("nakama")
 	qualifiedPostgresId := QualifiedId(postgresImageId + ":" + postgresVersion)
 	qualifiedPluginbuilderId := QualifiedId(pluginbuilderImageId + ":" + nakamaVersion)
 	qualifiedNakamaId := QualifiedId(nakamaImageId + ":" + nakamaVersion)
@@ -265,7 +265,7 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if err != nil {
 		return fmt.Errorf("unable to run %s: %w", id, err)
 	}
-	if err := PodmanFollowLogs(ctx, containerId); err != nil {
+	if err := PodmanFollowLogs(ctx, containerId, NakamaBuilderContainerShortName); err != nil {
 		return fmt.Errorf("unable to follow logs for %s: %w", ShortId(containerId), err)
 	}
 	if err := PodmanWait(ctx, containerId); err != nil {
@@ -282,7 +282,7 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if rel, err := filepath.Rel(r.wd, out); err == nil {
 		out = "./" + rel
 	}
-	Info(ctx).Str("out", out).Int64("size", fi.Size()).Msg("built")
+	Trace(ctx).Str("out", out).Int64("size", fi.Size()).Msg("built")
 	return nil
 }
 
@@ -305,7 +305,7 @@ func (r *Runner) RunPostgres(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("unable to run %s: %w", id, err)
 	}
-	if err := PodmanFollowLogs(ctx, containerId); err != nil {
+	if err := PodmanFollowLogs(ctx, containerId, PostgresContainerShortName); err != nil {
 		return err
 	}
 	if err := PodmanServiceWait(ctx, r.podId, "5432/tcp", func(local, remote string) error {
@@ -344,7 +344,7 @@ func (r *Runner) RunNakama(ctx context.Context, id string) error {
 		return fmt.Errorf("unable to run %s: %w", id, err)
 	}
 	// follow logs
-	if err := PodmanFollowLogs(ctx, containerId); err != nil {
+	if err := PodmanFollowLogs(ctx, containerId, NakamaContainerShortName); err != nil {
 		return fmt.Errorf("unable to follow logs for %s: %w", ShortId(containerId), err)
 	}
 	// wait for http to be available

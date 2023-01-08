@@ -93,7 +93,7 @@ func (p Proxy) DialError(ctx context.Context, inWriter io.Writer, w http.Respons
 		return
 	}
 	defer res.Body.Close()
-	Info(ctx).Int("code", res.StatusCode).Str("status", http.StatusText(res.StatusCode)).Msg("ws dial error status")
+	Trace(ctx).Int("code", res.StatusCode).Str("status", http.StatusText(res.StatusCode)).Msg("ws dial error status")
 	body, err := httputil.DumpResponse(res, true)
 	if err != nil {
 		Err(ctx, err).Msg("ws dial error: unable to dump response")
@@ -120,7 +120,7 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 	// proxy websockets
 	mux.HandleFunc(p.wsPath, func(w http.ResponseWriter, req *http.Request) {
 		logger := Logger(ctx).With().Str("remote", req.RemoteAddr).Logger()
-		logger.Info().Msg("ws open")
+		logger.Trace().Msg("ws open")
 		// dump request
 		buf, err := httputil.DumpRequest(req, true)
 		if err != nil {
@@ -139,7 +139,7 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 			header.Set("Authorization", s)
 		}
 		// connect outgoing websocket
-		Info(ctx).Str("url", urlstr).Msg("ws dial")
+		Trace(ctx).Str("url", urlstr).Msg("ws dial")
 		out, pres, err := p.dialer.DialContext(ctx, urlstr, header)
 		if err != nil {
 			p.DialError(ctx, inWriter, w, req, pres, err)
@@ -155,7 +155,7 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 			return
 		}
 		defer in.Close()
-		logger.Info().Msg("ws upgraded")
+		logger.Trace().Msg("ws upgraded")
 		errc := make(chan error, 1)
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
