@@ -3,6 +3,7 @@ package nktest
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -161,7 +162,9 @@ func (p *Proxy) run(ctx context.Context, l net.Listener, scheme, wsScheme string
 		defer cancel()
 		go p.ws(ctx, outWriter, in, out, errc)
 		go p.ws(ctx, inWriter, out, in, errc)
-		logger.Err(<-errc).Msg("ws close")
+		if err = <-errc; !errors.Is(err, &websocket.CloseError{}) {
+			logger.Err(err).Msg("ws close")
+		}
 	})
 	// proxy anything else
 	prox := httputil.NewSingleHostReverseProxy(&url.URL{
