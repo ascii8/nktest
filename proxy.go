@@ -79,7 +79,7 @@ func (p *Proxy) Run(ctx context.Context, urlstr string) (string, error) {
 	}
 	// run
 	go p.run(ctx, l, scheme, wsScheme, u)
-	return scheme + "://" + LocalAddr(l), nil
+	return scheme + "://" + localAddr(l), nil
 }
 
 // Addr returns the listening address.
@@ -240,8 +240,8 @@ func WithDialer(dialer websocket.Dialer) ProxyOption {
 	}
 }
 
-// LocalAddr returns the local address of the listener.
-func LocalAddr(l net.Listener) string {
+// localAddr returns the local address of the listener.
+func localAddr(l net.Listener) string {
 	addr := l.Addr().(*net.TCPAddr)
 	ip := addr.IP.String()
 	switch ip {
