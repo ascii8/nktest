@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 	Main(
 		ctx,
 		m,
-		WithDir("./testdata"),
+		WithDir("."),
 		WithBuildConfig("./nksample", WithDefaultGoEnv(), WithDefaultGoVolumes()),
 	)
 }

@@ -1,5 +1,3 @@
-/testdata/.cache/
-node_modules
-/gotest/gotest
+/.cache/
 *.log
 *.txt
