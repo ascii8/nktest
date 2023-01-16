@@ -574,6 +574,14 @@ func WithDefaultGoEnv() BuildConfigOption {
 	)
 }
 
+// WithFixProtoEnvVar is a nakama module build config option to set environment
+// variable GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn.
+func WithFixProtoEnvVar() BuildConfigOption {
+	return WithEnv(map[string]string{
+		"GOLANG_PROTOBUF_REGISTRATION_CONFLICT": "warn",
+	})
+}
+
 // WithMounts is a nakama module build config option to set additional mounts
 // used during builds.
 func WithMounts(mounts ...string) BuildConfigOption {
