@@ -1,8 +1,8 @@
-# nktest
+# About
 
 Package `nktest` provides a Nakama test runner that makes it easy to build and
-test [Nakama module plugins](https://heroiclabs.com) with complex or advanced
-game logic using nothing but `go test`.
+test [Nakama module plugins](https://github.com/heroiclabs/nakama) with complex
+or advanced game logic using nothing but `go test`.
 
 See also [`github.com/ascii8/nakama-go`](https://github.com/ascii8/nakama-go)
 package for a web/realtime Nakama Go client.
@@ -12,7 +12,7 @@ package for a web/realtime Nakama Go client.
 [![Reference](https://godoc.org/github.com/ascii8/nktest?status.svg)](https://pkg.go.dev/github.com/ascii8/nktest)
 [![Releases](https://img.shields.io/github/v/release/ascii8/nktest?display_name=tag&sort=semver)](https://github.com/ascii8/nktest/releases)
 
-## overview
+## Overview
 
 This package uses [Podman](https://podman.io) to create "rootless" containers
 (specifically, [`docker.io/heroiclabs/nakama-pluginbuilder`](https://hub.docker.com/r/heroiclabs/nakama-pluginbuilder)
@@ -26,7 +26,7 @@ end-to-end Nakama servers for game modules (Go, Lua, or Javascript).
 Provides additional transport and logger types for use with Go clients to
 readily aid in debugging Nakama's API calls.
 
-## quickstart
+## Quickstart
 
 Add to package/module:
 
@@ -107,17 +107,18 @@ For more advanced testing scenarios, [see the `github.com/ascii8/nakama-go`
 package](https://github.com/ascii8/nakama-go) for a full featured Go Nakama
 client.
 
-## examples
+## Examples
 
 * Testing (`nakama-go` package) - [github.com/ascii8/nakama-go/example_test.go](https://github.com/ascii8/nakama-go/blob/master/example_test.go)
 * Testing (this package) - [nktest_test.go](nktest_test.go)
 * CI/CD example (GitHub Actions, this repository) - [test.yml](.github/workflows/test.yml)
 * Go client for Nakama (usable with `GOOS=js GOOS=wasm`) - [`github.com/ascii8/nakama-go`](https://github.com/ascii8/nakama-go)
+* Pure Go implementation of Nakama's XOXO example - [github.com/ascii8/xoxo-go](https://github.com/ascii8/xoxo-go)
 
 See the [Go package documentation](https://pkg.go.dev/github.com/ascii8/nktest)
 for package level examples.
 
-## why
+## Why
 
 While Nakama provides a number of different languages with which to build out
 game modules, building large-scale, complex logic for Nakama is best done using
@@ -131,7 +132,7 @@ and continuous integration/deployment (CI/CD).
 As such, there was clear motivation to make it easy and repeatable to test
 entirely from `go test`,
 
-### why podman
+### Why Podman
 
 The first version of `nktest` used Docker, but builds and tests were slow as it
 was not possible to mount the user's Go build/mod cache directories without
@@ -139,7 +140,7 @@ stomping on the local UID/GID and subsequently affecting the read/write
 permissions. Thus the change to Podman, which is able to run containers without
 root permissions, and can keep user UID/GID's on files.
 
-## notes
+## Notes
 
 macOS:
 
