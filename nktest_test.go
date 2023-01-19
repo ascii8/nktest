@@ -17,11 +17,15 @@ func TestMain(m *testing.M) {
 	ctx := context.Background()
 	ctx = WithAlwaysPullFromEnv(ctx, "PULL")
 	ctx = WithHostPortMap(ctx)
+	var opts []BuildConfigOption
+	if os.Getenv("CI") == "" {
+		opts = append(opts, WithDefaultGoEnv(), WithDefaultGoVolumes())
+	}
 	Main(
 		ctx,
 		m,
 		WithDir("."),
-		WithBuildConfig("./nksample", WithDefaultGoEnv(), WithDefaultGoVolumes()),
+		WithBuildConfig("./nksample", opts...),
 	)
 }
 

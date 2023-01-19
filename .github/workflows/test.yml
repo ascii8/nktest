@@ -30,4 +30,4 @@ jobs:
           /usr/local/bin/podman system service --time=0 $PODMAN_HOST &
       - name: test
         run: |
-          TRACE=1 go test -v
+          TRACE=1 go test -v -timeout=1h
