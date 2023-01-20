@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	pntypes "github.com/containers/common/libnetwork/types"
 	pdefine "github.com/containers/podman/v4/libpod/define"
@@ -37,26 +39,32 @@ func PodmanOpen(ctx context.Context) (context.Context, context.Context, error) {
 		}
 		var firstErr error
 		for _, info := range infos {
-			urlstr := info.URI
-			if strings.HasPrefix(urlstr, "/") {
-				urlstr = "unix://" + urlstr
+			uri := info.URI
+			if strings.HasPrefix(uri, "/") {
+				uri = "unix://" + uri
 			}
 			var conn context.Context
 			var err error
 			if info.Identity == "" {
-				conn, err = pbindings.NewConnection(context.Background(), urlstr)
+				conn, err = pbindings.NewConnection(context.Background(), uri)
 			} else {
-				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), urlstr, info.Identity, info.Insecure)
+				conn, err = pbindings.NewConnectionWithIdentity(context.Background(), uri, info.Identity, info.Insecure)
 			}
 			if err == nil {
-				ev := Trace(ctx).Str("uri", info.URI)
+				ev := Debug(ctx).Str("uri", info.URI)
 				if info.Identity != "" {
 					ev = ev.Str("identity", info.Identity)
 				}
 				ev.Msg("podman")
 				ctx, _ := onecontext.Merge(ctx, conn)
 				return context.WithValue(ctx, podmanConnKey, conn), conn, nil
-			} else if firstErr == nil {
+			}
+			ev := Trace(ctx).Str("uri", info.URI)
+			if info.Identity != "" {
+				ev = ev.Str("identity", info.Identity)
+			}
+			ev.AnErr("err", err).Msg("podman open error")
+			if firstErr == nil {
 				firstErr = err
 			}
 		}
@@ -159,7 +167,9 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 	Trace(ctx).Str("id", id).Msg("creating container")
 	// create spec
 	s := pspecgen.NewSpecGenerator(id, false)
-	s.Remove = true
+	// FIXME: problem with podman v4.3.x static build: if remove is true, then
+	// FIXME: containers won't terminate properly
+	s.Remove = false
 	s.Pod = podId
 	s.Env = env
 	var err error
@@ -180,6 +190,12 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 			new(pcontainers.StopOptions).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
 		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) {
 			Err(ctx, err).Str("id", id).Str("short", ShortId(res.ID)).Msg("unable to stop container")
+		}
+		if _, err := pcontainers.Remove(
+			PodmanConn(ctx), res.ID,
+			new(pcontainers.RemoveOptions).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
+		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) {
+			Err(ctx, err).Str("id", id).Str("short", ShortId(res.ID)).Msg("unable to remove container")
 		}
 	}()
 	// run
@@ -204,15 +220,43 @@ func PodmanFollowLogs(ctx context.Context, id, shortName string) error {
 }
 
 // PodmanWait waits until a container has stopped.
-func PodmanWait(ctx context.Context, id string) error {
+func PodmanWait(parent context.Context, id string) error {
 	if id == "" {
 		return nil
 	}
-	if _, err := pcontainers.Wait(ctx, id, &pcontainers.WaitOptions{
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	go func() {
+		defer cancel()
+		for {
+			child, childCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+			if _, err := pcontainers.Inspect(child, id, nil); err != nil {
+				defer childCancel()
+				return
+			}
+			childCancel()
+			select {
+			case <-parent.Done():
+				return
+			case <-ctx.Done():
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}()
+	_, err := pcontainers.Wait(ctx, id, &pcontainers.WaitOptions{
 		Condition: []pdefine.ContainerStatus{
 			pdefine.ContainerStateStopped,
+			pdefine.ContainerStateExited,
+			pdefine.ContainerStateRemoving,
 		},
-	}); err != nil {
+	})
+	switch {
+	case errors.Is(err, context.DeadlineExceeded),
+		errors.Is(err, context.Canceled),
+		err != nil && perrors.Contains(err, pdefine.ErrNoSuchCtr),
+		err != nil && perrors.Contains(err, pdefine.ErrCtrStateInvalid):
+	case err != nil:
 		return fmt.Errorf("unable to wait for container %s to stop: %w", id, err)
 	}
 	return nil
@@ -314,19 +358,19 @@ func ParsePortMapping(s string) (pntypes.PortMapping, error) {
 // BuildPodmanConnInfo builds a list of potential podman connection info.
 func BuildPodmanConnInfo(ctx context.Context) ([]PodmanConnInfo, error) {
 	var infos []PodmanConnInfo
-	if uri := os.Getenv("PODMAN_HOST"); uri != "" {
-		infos = append(infos, PodmanConnInfo{URI: uri})
+	for _, v := range []string{"CONTAINER_HOST", "PODMAN_HOST", "DOCKER_HOST"} {
+		if uri := os.Getenv(v); uri != "" {
+			infos = append(infos, PodmanConnInfo{URI: uri})
+			return infos, nil
+		}
 	}
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		infos = append(infos, PodmanConnInfo{URI: "unix:" + dir + "/podman/podman.sock"})
+		infos = append(infos, PodmanConnInfo{URI: dir + "/podman/podman.sock"})
 	}
 	if v, err := PodmanSystemConnectionList(ctx); err == nil && len(v) != 0 {
 		infos = append(infos, v...)
 	}
 	infos = append(infos, PodmanConnInfo{URI: "/var/run/podman/podman.sock"})
-	if uri := os.Getenv("DOCKER_HOST"); uri != "" {
-		infos = append(infos, PodmanConnInfo{URI: uri})
-	}
 	return infos, nil
 }
 

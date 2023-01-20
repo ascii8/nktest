@@ -16,6 +16,7 @@ import (
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	ctx = WithAlwaysPullFromEnv(ctx, "PULL")
+	ctx = WithUnderCIFromEnv(ctx, "CI")
 	ctx = WithHostPortMap(ctx)
 	var opts []BuildConfigOption
 	if os.Getenv("CI") == "" {

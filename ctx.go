@@ -22,6 +22,7 @@ var (
 	DefaultPrefixOut             = "-> "
 	DefaultPrefixIn              = "<- "
 	DefaultAlwaysPull            = false
+	DefaultUnderCI               = false
 	DefaultPostgresImageId       = "docker.io/library/postgres"
 	DefaultNakamaImageId         = "docker.io/heroiclabs/nakama"
 	DefaultPluginbuilderImageId  = "docker.io/heroiclabs/nakama-pluginbuilder"
@@ -32,6 +33,7 @@ var (
 	DefaultDockerAuthScope       = "repository:%s:pull"
 	DefaultVersionCacheTTL       = 96 * time.Hour
 	DefaultPodRemoveTimeout      = 200 * time.Millisecond
+	DefaultBuildTimeout          = 5 * time.Minute
 	DefaultBackoffMaxInterval    = 2 * time.Second
 	DefaultBackoffMaxElapsedTime = 30 * time.Second
 	DefaultConfigFilename        = "config.yml"
@@ -51,6 +53,7 @@ const (
 	podmanConnKey
 	portMapKey
 	alwaysPullKey
+	underCIKey
 	dockerRegistryURLKey
 	dockerTokenURLKey
 	dockerAuthNameKey
@@ -64,6 +67,7 @@ const (
 	configTemplateKey
 	versionCacheTTLKey
 	podRemoveTimeoutKey
+	buildTimeoutKey
 	backoffMaxIntervalKey
 	backoffMaxElapsedTimeKey
 )
@@ -123,11 +127,18 @@ func WithAlwaysPull(parent context.Context, alwaysPull bool) context.Context {
 	return context.WithValue(parent, alwaysPullKey, alwaysPull)
 }
 
-// WithAlwaysPull sets the always pull flag from an environment variable on the
+// WithAlwaysPullFromEnv sets the always pull flag from an environment variable on the
 // context.
 func WithAlwaysPullFromEnv(parent context.Context, name string) context.Context {
 	pull := os.Getenv(name)
 	return context.WithValue(parent, alwaysPullKey, pull != "" && pull != "false" && pull != "0")
+}
+
+// WithUnderCIFromEnv sets the under CI flag from an environment variable on
+// the context.
+func WithUnderCIFromEnv(parent context.Context, name string) context.Context {
+	underCI := os.Getenv(name)
+	return context.WithValue(parent, underCIKey, underCI != "" && underCI != "false" && underCI != "0")
 }
 
 // WithDockerRegistryURL sets the docker registry url on the context. Used for
@@ -199,6 +210,11 @@ func WithPodRemoveTimeout(parent context.Context, podRemoveTimeout time.Duration
 	return context.WithValue(parent, podRemoveTimeoutKey, podRemoveTimeout)
 }
 
+// WithBuildTimeout sets the pod remove timeout on the context.
+func WithBuildTimeout(parent context.Context, buildTimeout time.Duration) context.Context {
+	return context.WithValue(parent, buildTimeoutKey, buildTimeout)
+}
+
 // WithBackofffMaxInterval sets the max backoff interval on the context. Used
 // when waiting for services (ie, postres, nakama) to start/become available.
 func WithBackoffMaxInterval(parent context.Context, maxInterval time.Duration) context.Context {
@@ -252,6 +268,14 @@ func AlwaysPull(ctx context.Context) bool {
 		return alwaysPull
 	}
 	return DefaultAlwaysPull
+}
+
+// UnderCI returns whether or not to always pull an image.
+func UnderCI(ctx context.Context) bool {
+	if underCI, ok := ctx.Value(underCIKey).(bool); ok {
+		return underCI
+	}
+	return DefaultUnderCI
 }
 
 // DockerRegistryURL returns the docker registry url.
@@ -401,6 +425,14 @@ func PodRemoveTimeout(ctx context.Context) time.Duration {
 		return podRemoveTimeout
 	}
 	return DefaultPodRemoveTimeout
+}
+
+// BuildTimeout returns the build timeout.
+func BuildTimeout(ctx context.Context) time.Duration {
+	if buildTimeout, ok := ctx.Value(buildTimeoutKey).(time.Duration); ok {
+		return buildTimeout
+	}
+	return DefaultBuildTimeout
 }
 
 // Backoff executes f until backoff conditions are met or until f returns nil,

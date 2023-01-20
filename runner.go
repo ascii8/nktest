@@ -245,6 +245,22 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	case err != nil:
 		return fmt.Errorf("could not stat %s: %w", out, err)
 	}
+	entrypoint := []string{
+		"go",
+		"build",
+		"-trimpath",
+		"-buildmode=plugin",
+	}
+	if UnderCI(ctx) {
+		entrypoint = append(entrypoint,
+			"-a",
+			"-v",
+			"-x",
+			"-work",
+		)
+	}
+	entrypoint = append(entrypoint, bc.buildOpts...)
+	entrypoint = append(entrypoint, "-o=/nakama/modules/"+bc.out, "./"+pkgDir)
 	containerId, err := PodmanRun(
 		ctx,
 		id,
@@ -255,12 +271,7 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 			filepath.Join(r.dir)+":/builder",
 			filepath.Join(r.volumeDir, "nakama")+":/nakama",
 		),
-		"go",
-		"build",
-		"-trimpath",
-		"-buildmode=plugin",
-		"-o=/nakama/modules/"+bc.out,
-		"./"+pkgDir,
+		entrypoint...,
 	)
 	if err != nil {
 		return fmt.Errorf("unable to run %s: %w", id, err)
@@ -268,9 +279,12 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if err := PodmanFollowLogs(ctx, containerId, NakamaBuilderContainerShortName); err != nil {
 		return fmt.Errorf("unable to follow logs for %s: %w", ShortId(containerId), err)
 	}
+	ctx, cancel := context.WithTimeout(ctx, BuildTimeout(ctx))
+	defer cancel()
 	if err := PodmanWait(ctx, containerId); err != nil {
 		return err
 	}
+	// ensure it exists
 	fi, err := os.Stat(out)
 	switch {
 	case err != nil && errors.Is(err, os.ErrNotExist):
@@ -504,6 +518,8 @@ type BuildConfig struct {
 	env map[string]string
 	// mounts are additional volume mounts.
 	mounts []string
+	// buildOpts are additional go build options.
+	buildOpts []string
 }
 
 // BuildConfigOption is nakama module build config option.
@@ -628,6 +644,15 @@ func WithDefaultGoVolumes() BuildConfigOption {
 		NewEnvVolume("GOMODCACHE", "/go/pkg/mod", ""),
 		NewEnvVolume("GOPATH", "/go/src", "src"),
 	)
+}
+
+// WithGoBuildOptions is a nakama module build config option to add additional
+// command-line options to Go build.
+func WithGoBuildOptions(buildOpts ...string) BuildConfigOption {
+	return func(bc *BuildConfig) error {
+		bc.buildOpts = append(bc.buildOpts, buildOpts...)
+		return nil
+	}
 }
 
 // EnvVolumeInfo holds information about an environment variable derived
