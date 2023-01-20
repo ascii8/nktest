@@ -9,7 +9,7 @@ package for a web/realtime Nakama Go client.
 
 [![Tests](https://github.com/ascii8/nktest/workflows/Test/badge.svg)](https://github.com/ascii8/nktest/actions?query=workflow%3ATest)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ascii8/nktest)](https://goreportcard.com/report/github.com/ascii8/nktest)
-[![Reference](https://godoc.org/github.com/ascii8/nktest?status.svg)](https://pkg.go.dev/github.com/ascii8/nktest)
+[![Reference](https://pkg.go.dev/badge/github.com/ascii8/nktest
 [![Releases](https://img.shields.io/github/v/release/ascii8/nktest?display_name=tag&sort=semver)](https://github.com/ascii8/nktest/releases)
 
 ## Overview
