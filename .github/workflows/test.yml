@@ -25,7 +25,7 @@ jobs:
           gpg --batch --verify podman-linux-amd64.tar.gz.asc podman-linux-amd64.tar.gz
           tar -xzf podman-linux-amd64.tar.gz
           sudo cp -r podman-linux-amd64/usr podman-linux-amd64/etc /
-          echo "CONTAINER_HOST: $CONTAINER_HOST"
+          echo "PODMAN_HOST: $PODMAN_HOST"
           /usr/local/bin/podman system service --time=0 $PODMAN_HOST &
           export CONTAINER_HOST=$PODMAN_HOST
           /usr/local/bin/podman --remote version
