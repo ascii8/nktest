@@ -63,7 +63,7 @@ func PodmanOpen(ctx context.Context) (context.Context, context.Context, error) {
 			if info.Identity != "" {
 				ev = ev.Str("identity", info.Identity)
 			}
-			ev.AnErr("err", err).Msg("podman open error")
+			ev.AnErr("error", err).Msg("podman open error")
 			if firstErr == nil {
 				firstErr = err
 			}
