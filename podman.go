@@ -263,13 +263,13 @@ func PodmanWait(parent context.Context, id string) error {
 }
 
 // PodmanServiceWait waits for a container service to be available.
-func PodmanServiceWait(ctx context.Context, id, svc string, f func(string, string) error) error {
+func PodmanServiceWait(ctx context.Context, id, svc string, f func(context.Context, string, string) error) error {
 	local, remote, err := PodmanGetAddr(ctx, id, svc)
 	if err != nil {
 		return err
 	}
-	return Backoff(ctx, func() error {
-		return f(local, remote)
+	return Backoff(ctx, func(context.Context) error {
+		return f(ctx, local, remote)
 	})
 }
 

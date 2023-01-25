@@ -3,7 +3,6 @@ module github.com/ascii8/nktest
 go 1.19
 
 require (
-	github.com/cenkalti/backoff/v4 v4.2.0
 	github.com/containers/common v0.50.1
 	github.com/containers/podman/v4 v4.3.1
 	github.com/gorilla/websocket v1.5.0

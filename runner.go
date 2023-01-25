@@ -322,7 +322,7 @@ func (r *Runner) RunPostgres(ctx context.Context, id string) error {
 	if err := PodmanFollowLogs(ctx, containerId, PostgresContainerShortName); err != nil {
 		return err
 	}
-	if err := PodmanServiceWait(ctx, r.podId, "5432/tcp", func(local, remote string) error {
+	if err := PodmanServiceWait(ctx, r.podId, "5432/tcp", func(ctx context.Context, local, remote string) error {
 		r.postgresLocal = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", r.name, r.name, local, r.name)
 		r.postgresRemote = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", r.name, r.name, remote, r.name)
 		db, err := sql.Open("postgres", r.postgresLocal)
@@ -362,7 +362,7 @@ func (r *Runner) RunNakama(ctx context.Context, id string) error {
 		return fmt.Errorf("unable to follow logs for %s: %w", ShortId(containerId), err)
 	}
 	// wait for http to be available
-	if err := PodmanServiceWait(ctx, r.podId, "7350/tcp", func(local, remote string) error {
+	if err := PodmanServiceWait(ctx, r.podId, "7350/tcp", func(ctx context.Context, local, remote string) error {
 		r.httpLocal = "http://" + local
 		r.httpRemote = "http://" + remote
 		req, err := http.NewRequestWithContext(ctx, "GET", r.httpLocal+"/healthcheck", nil)
@@ -383,7 +383,7 @@ func (r *Runner) RunNakama(ctx context.Context, id string) error {
 		return fmt.Errorf("unable to connect to %s (http): %w", ShortId(containerId), err)
 	}
 	// grpc ports
-	if err := PodmanServiceWait(ctx, r.podId, "7349/tcp", func(local, remote string) error {
+	if err := PodmanServiceWait(ctx, r.podId, "7349/tcp", func(ctx context.Context, local, remote string) error {
 		r.grpcLocal = local
 		r.grpcRemote = remote
 		return nil
@@ -391,7 +391,7 @@ func (r *Runner) RunNakama(ctx context.Context, id string) error {
 		return fmt.Errorf("unable to connect to %s (grpc): %w", ShortId(containerId), err)
 	}
 	// console ports
-	if err := PodmanServiceWait(ctx, r.podId, "7351/tcp", func(local, remote string) error {
+	if err := PodmanServiceWait(ctx, r.podId, "7351/tcp", func(ctx context.Context, local, remote string) error {
 		prefix := "http://" + r.name + ":" + r.name + "_password@"
 		r.consoleLocal = prefix + local
 		r.consoleRemote = prefix + remote

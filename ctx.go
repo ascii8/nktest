@@ -13,30 +13,28 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"golang.org/x/mod/semver"
 )
 
 // Defaults.
 var (
-	DefaultPrefixOut             = "-> "
-	DefaultPrefixIn              = "<- "
-	DefaultAlwaysPull            = false
-	DefaultUnderCI               = false
-	DefaultPostgresImageId       = "docker.io/library/postgres"
-	DefaultNakamaImageId         = "docker.io/heroiclabs/nakama"
-	DefaultPluginbuilderImageId  = "docker.io/heroiclabs/nakama-pluginbuilder"
-	DefaultPostgresVersion       = "latest"
-	DefaultDockerRegistryURL     = "https://registry-1.docker.io"
-	DefaultDockerTokenURL        = "https://auth.docker.io/token"
-	DefaultDockerAuthName        = "registry.docker.io"
-	DefaultDockerAuthScope       = "repository:%s:pull"
-	DefaultVersionCacheTTL       = 96 * time.Hour
-	DefaultPodRemoveTimeout      = 200 * time.Millisecond
-	DefaultBuildTimeout          = 5 * time.Minute
-	DefaultBackoffMaxInterval    = 2 * time.Second
-	DefaultBackoffMaxElapsedTime = 30 * time.Second
-	DefaultConfigFilename        = "config.yml"
+	DefaultPrefixOut            = "-> "
+	DefaultPrefixIn             = "<- "
+	DefaultAlwaysPull           = false
+	DefaultUnderCI              = false
+	DefaultPostgresImageId      = "docker.io/library/postgres"
+	DefaultNakamaImageId        = "docker.io/heroiclabs/nakama"
+	DefaultPluginbuilderImageId = "docker.io/heroiclabs/nakama-pluginbuilder"
+	DefaultPostgresVersion      = "latest"
+	DefaultDockerRegistryURL    = "https://registry-1.docker.io"
+	DefaultDockerTokenURL       = "https://auth.docker.io/token"
+	DefaultDockerAuthName       = "registry.docker.io"
+	DefaultDockerAuthScope      = "repository:%s:pull"
+	DefaultVersionCacheTTL      = 96 * time.Hour
+	DefaultPodRemoveTimeout     = 200 * time.Millisecond
+	DefaultBuildTimeout         = 5 * time.Minute
+	DefaultBackoffConfig        = BackoffConfig{50 * time.Millisecond, 1 * time.Second, 30 * time.Second, 1.2}
+	DefaultConfigFilename       = "config.yml"
 	//go:embed config.yml.tpl
 	DefaultConfigTemplate string
 )
@@ -68,8 +66,7 @@ const (
 	versionCacheTTLKey
 	podRemoveTimeoutKey
 	buildTimeoutKey
-	backoffMaxIntervalKey
-	backoffMaxElapsedTimeKey
+	backoffConfigKey
 )
 
 // WithStdout sets the stdout on the context.
@@ -215,17 +212,16 @@ func WithBuildTimeout(parent context.Context, buildTimeout time.Duration) contex
 	return context.WithValue(parent, buildTimeoutKey, buildTimeout)
 }
 
-// WithBackofffMaxInterval sets the max backoff interval on the context. Used
-// when waiting for services (ie, postres, nakama) to start/become available.
-func WithBackoffMaxInterval(parent context.Context, maxInterval time.Duration) context.Context {
-	return context.WithValue(parent, backoffMaxIntervalKey, maxInterval)
+// WithBackoffConfig sets the backoff config on the context. Used when waiting
+// for services (ie, postgres, nakama) to become available.
+func WithBackoffConfig(parent context.Context, backoffConfig BackoffConfig) context.Context {
+	return context.WithValue(parent, backoffConfigKey, backoffConfig)
 }
 
-// WithBackofffMaxElapsedTime sets the max backoff elapsed time on the context.
-// Used when waiting for services (ie, postgres, nakama) to start/become
-// available.
-func WithBackoffMaxElapsedTime(parent context.Context, maxElapsedTime time.Duration) context.Context {
-	return context.WithValue(parent, backoffMaxElapsedTimeKey, maxElapsedTime)
+// WithBackoff sets the backoff min, max, timeout, and factor on the context.
+// Used when waiting for services (ie, postgres, nakama) to become available.
+func WithBackoff(parent context.Context, min, max, timeout time.Duration, factor float64) context.Context {
+	return WithBackoffConfig(parent, BackoffConfig{min, max, timeout, factor})
 }
 
 // PortMap returns the port map from the context.
@@ -437,17 +433,27 @@ func BuildTimeout(ctx context.Context) time.Duration {
 
 // Backoff executes f until backoff conditions are met or until f returns nil,
 // or the context is closed.
-func Backoff(ctx context.Context, f func() error) error {
-	p := backoff.NewExponentialBackOff()
-	p.MaxInterval = DefaultBackoffMaxInterval
-	if d, ok := ctx.Value(backoffMaxIntervalKey).(time.Duration); ok {
-		p.MaxInterval = d
+func Backoff(ctx context.Context, f func(context.Context) error) error {
+	bc, ok := ctx.Value(backoffConfigKey).(BackoffConfig)
+	if !ok {
+		bc = DefaultBackoffConfig
 	}
-	p.MaxElapsedTime = DefaultBackoffMaxElapsedTime
-	if d, ok := ctx.Value(backoffMaxElapsedTimeKey).(time.Duration); ok {
-		p.MaxElapsedTime = d
+	ctx, cancel := context.WithTimeout(ctx, bc.Timeout)
+	defer cancel()
+	var err error
+	for d := bc.Min; ; {
+		if err = f(ctx); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			break
+		case <-time.After(d):
+		}
+		d = bc.Next(d)
 	}
-	return backoff.Retry(f, backoff.WithContext(p, ctx))
+	return err
 }
 
 // ConfigTemplate returns the config template.
@@ -464,4 +470,20 @@ func ConfigFilename(ctx context.Context) string {
 		return configFilename
 	}
 	return DefaultConfigFilename
+}
+
+// BackoffConfig holds the backoff configuration.
+type BackoffConfig struct {
+	Min     time.Duration
+	Max     time.Duration
+	Timeout time.Duration
+	Factor  float64
+}
+
+// Next calculates the next backoff duration.
+func (bc BackoffConfig) Next(d time.Duration) time.Duration {
+	if d = time.Duration(float64(d) * bc.Factor); d < bc.Max {
+		return d
+	}
+	return bc.Max
 }
