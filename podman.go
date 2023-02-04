@@ -105,7 +105,7 @@ func PodmanPodKill(ctx context.Context, name string) error {
 			Trace(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("stopping pod")
 			_, _ = ppods.Stop(ctx, p.Id, new(ppods.StopOptions).WithTimeout(int(PodRemoveTimeout(ctx))))
 			Trace(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("removing pod")
-			_, _ = ppods.Remove(ctx, p.Id, new(ppods.RemoveOptions).WithTimeout(uint(PodRemoveTimeout(ctx))))
+			_, _ = ppods.Remove(ctx, p.Id, new(ppods.RemoveOptions).WithForce(true).WithTimeout(uint(PodRemoveTimeout(ctx))))
 		}
 	}
 	return nil
@@ -187,14 +187,14 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 		Trace(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("stopping container")
 		if err := pcontainers.Stop(
 			PodmanConn(ctx), res.ID,
-			new(pcontainers.StopOptions).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
-		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) {
+			new(pcontainers.StopOptions).WithIgnore(true).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
+		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) && !perrors.Contains(err, pdefine.ErrNoSuchPod) {
 			Err(ctx, err).Str("id", id).Str("short", ShortId(res.ID)).Msg("unable to stop container")
 		}
 		if _, err := pcontainers.Remove(
 			PodmanConn(ctx), res.ID,
-			new(pcontainers.RemoveOptions).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
-		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) {
+			new(pcontainers.RemoveOptions).WithForce(true).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
+		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) && !perrors.Contains(err, pdefine.ErrNoSuchPod) {
 			Err(ctx, err).Str("id", id).Str("short", ShortId(res.ID)).Msg("unable to remove container")
 		}
 	}()
