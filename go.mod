@@ -6,13 +6,13 @@ require (
 	github.com/containers/common v0.50.1
 	github.com/containers/podman/v4 v4.3.1
 	github.com/gorilla/websocket v1.5.0
-	github.com/heroiclabs/nakama-common v1.26.0
-	github.com/lib/pq v1.10.7
+	github.com/heroiclabs/nakama-common v1.27.0
+	github.com/lib/pq v1.10.8
 	github.com/opencontainers/runtime-spec v1.0.3-0.20211214071223-8958f93039ab
-	github.com/rs/zerolog v1.29.0
+	github.com/rs/zerolog v1.29.1
 	github.com/teivah/onecontext v1.3.0
 	github.com/yookoala/realpath v1.0.0
-	golang.org/x/mod v0.9.0
+	golang.org/x/mod v0.10.0
 )
 
 require (
@@ -35,7 +35,7 @@ require (
 	github.com/containers/ocicrypt v1.1.6 // indirect
 	github.com/containers/psgo v1.7.3 // indirect
 	github.com/containers/storage v1.43.0 // indirect
-	github.com/coreos/go-systemd/v22 v22.4.0 // indirect
+	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
 	github.com/disiqueira/gotree/v3 v3.0.2 // indirect
 	github.com/docker/distribution v2.8.1+incompatible // indirect
