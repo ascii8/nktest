@@ -54,6 +54,8 @@ type Runner struct {
 	consoleLocal string
 	// consoleRemote is the remote console address.
 	consoleRemote string
+	// runEnv is the run env.
+	runEnv map[string]string
 }
 
 // NewRunner creates a new nakama test runner.
@@ -342,7 +344,7 @@ func (r *Runner) RunNakama(ctx context.Context, id string) error {
 		ctx,
 		id,
 		r.podId,
-		nil,
+		r.runEnv,
 		[]string{
 			filepath.Join(r.volumeDir, "nakama") + ":/nakama/data",
 		},
@@ -488,6 +490,13 @@ func WithDir(dir string) Option {
 func WithVolumeDir(volumeDir string) Option {
 	return func(r *Runner) {
 		r.volumeDir = volumeDir
+	}
+}
+
+// WithRunEnv is a nakama test runner option to set run environment variables.
+func WithRunEnv(runEnv map[string]string) Option {
+	return func(r *Runner) {
+		r.runEnv = runEnv
 	}
 }
 
