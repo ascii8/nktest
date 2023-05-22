@@ -38,6 +38,10 @@ type Runner struct {
 	podId string
 	// podContainerId is the pod infrastructure container id.
 	podContainerId string
+	// nakamaContainerId is the nakama container id.
+	nakamaContainerId string
+	// postgresContainerId is the postgres container id.
+	postgresContainerId string
 	// postgresLocal is the local postgres address.
 	postgresLocal string
 	// postgresRemote is the remote postgres address.
@@ -185,6 +189,14 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.RunNakama(ctx, qualifiedNakamaId); err != nil {
 		return fmt.Errorf("unable to start nakama: %w", err)
 	}
+	go func() {
+		<-ctx.Done()
+		PodmanStopAndRemove(ctx, qualifiedNakamaId, r.nakamaContainerId)
+		_ = PodmanWait(ctx, r.nakamaContainerId)
+		PodmanStopAndRemove(ctx, qualifiedPostgresId, r.postgresContainerId)
+		_ = PodmanWait(ctx, r.postgresContainerId)
+		_ = PodmanPodKill(ctx, r.podName)
+	}()
 	return nil
 }
 
@@ -278,6 +290,10 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 	if err != nil {
 		return fmt.Errorf("unable to run %s: %w", id, err)
 	}
+	go func() {
+		<-ctx.Done()
+		PodmanStopAndRemove(ctx, id, containerId)
+	}()
 	if err := PodmanFollowLogs(ctx, containerId, NakamaBuilderContainerShortName); err != nil {
 		return fmt.Errorf("unable to follow logs for %s: %w", ShortId(containerId), err)
 	}
@@ -304,7 +320,8 @@ func (r *Runner) BuildModule(ctx context.Context, id string, bc *BuildConfig) er
 
 // RunPostgres runs the postgres server.
 func (r *Runner) RunPostgres(ctx context.Context, id string) error {
-	containerId, err := PodmanRun(
+	var err error
+	r.postgresContainerId, err = PodmanRun(
 		ctx,
 		id,
 		r.podId,
@@ -321,10 +338,10 @@ func (r *Runner) RunPostgres(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("unable to run %s: %w", id, err)
 	}
-	if err := PodmanFollowLogs(ctx, containerId, PostgresContainerShortName); err != nil {
+	if err := PodmanFollowLogs(ctx, r.postgresContainerId, PostgresContainerShortName); err != nil {
 		return err
 	}
-	if err := PodmanServiceWait(ctx, r.podId, "5432/tcp", func(ctx context.Context, local, remote string) error {
+	if err := PodmanWaitService(ctx, r.podId, "5432/tcp", func(ctx context.Context, local, remote string) error {
 		r.postgresLocal = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", r.name, r.name, local, r.name)
 		r.postgresRemote = fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", r.name, r.name, remote, r.name)
 		db, err := sql.Open("postgres", r.postgresLocal)
@@ -333,14 +350,15 @@ func (r *Runner) RunPostgres(ctx context.Context, id string) error {
 		}
 		return db.Ping()
 	}); err != nil {
-		return fmt.Errorf("unable to connect to postgres %s: %w", ShortId(containerId), err)
+		return fmt.Errorf("unable to connect to postgres %s: %w", ShortId(r.postgresContainerId), err)
 	}
 	return nil
 }
 
 // RunNakama runs the nakama server.
 func (r *Runner) RunNakama(ctx context.Context, id string) error {
-	containerId, err := PodmanRun(
+	var err error
+	r.nakamaContainerId, err = PodmanRun(
 		ctx,
 		id,
 		r.podId,
@@ -360,11 +378,11 @@ func (r *Runner) RunNakama(ctx context.Context, id string) error {
 		return fmt.Errorf("unable to run %s: %w", id, err)
 	}
 	// follow logs
-	if err := PodmanFollowLogs(ctx, containerId, NakamaContainerShortName); err != nil {
-		return fmt.Errorf("unable to follow logs for %s: %w", ShortId(containerId), err)
+	if err := PodmanFollowLogs(ctx, r.nakamaContainerId, NakamaContainerShortName); err != nil {
+		return fmt.Errorf("unable to follow logs for %s: %w", ShortId(r.nakamaContainerId), err)
 	}
 	// wait for http to be available
-	if err := PodmanServiceWait(ctx, r.podId, "7350/tcp", func(ctx context.Context, local, remote string) error {
+	if err := PodmanWaitService(ctx, r.podId, "7350/tcp", func(ctx context.Context, local, remote string) error {
 		r.httpLocal = "http://" + local
 		r.httpRemote = "http://" + remote
 		req, err := http.NewRequestWithContext(ctx, "GET", r.httpLocal+"/healthcheck", nil)
@@ -382,24 +400,24 @@ func (r *Runner) RunNakama(ctx context.Context, id string) error {
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("unable to connect to %s (http): %w", ShortId(containerId), err)
+		return fmt.Errorf("unable to connect to %s (http): %w", ShortId(r.nakamaContainerId), err)
 	}
 	// grpc ports
-	if err := PodmanServiceWait(ctx, r.podId, "7349/tcp", func(ctx context.Context, local, remote string) error {
+	if err := PodmanWaitService(ctx, r.podId, "7349/tcp", func(ctx context.Context, local, remote string) error {
 		r.grpcLocal = local
 		r.grpcRemote = remote
 		return nil
 	}); err != nil {
-		return fmt.Errorf("unable to connect to %s (grpc): %w", ShortId(containerId), err)
+		return fmt.Errorf("unable to connect to %s (grpc): %w", ShortId(r.nakamaContainerId), err)
 	}
 	// console ports
-	if err := PodmanServiceWait(ctx, r.podId, "7351/tcp", func(ctx context.Context, local, remote string) error {
+	if err := PodmanWaitService(ctx, r.podId, "7351/tcp", func(ctx context.Context, local, remote string) error {
 		prefix := "http://" + r.name + ":" + r.name + "_password@"
 		r.consoleLocal = prefix + local
 		r.consoleRemote = prefix + remote
 		return nil
 	}); err != nil {
-		return fmt.Errorf("unable to connect to %s (console): %w", ShortId(containerId), err)
+		return fmt.Errorf("unable to connect to %s (console): %w", ShortId(r.nakamaContainerId), err)
 	}
 	return nil
 }

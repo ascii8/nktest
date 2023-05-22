@@ -96,16 +96,16 @@ func PodmanPullImages(ctx context.Context, ids ...string) error {
 
 // PodmanPodKill kills pod with matching name.
 func PodmanPodKill(ctx context.Context, name string) error {
-	res, err := ppods.List(ctx, nil)
+	res, err := ppods.List(PodmanConn(ctx), nil)
 	if err != nil {
 		return err
 	}
 	for _, p := range res {
 		if p.Name == name {
 			Trace(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("stopping pod")
-			_, _ = ppods.Stop(ctx, p.Id, new(ppods.StopOptions).WithTimeout(int(PodRemoveTimeout(ctx))))
+			_, _ = ppods.Stop(PodmanConn(ctx), p.Id, new(ppods.StopOptions).WithTimeout(int(PodRemoveTimeout(ctx))))
 			Trace(ctx).Str("name", name).Str("short", ShortId(p.Id)).Msg("removing pod")
-			_, _ = ppods.Remove(ctx, p.Id, new(ppods.RemoveOptions).WithForce(true).WithTimeout(uint(PodRemoveTimeout(ctx))))
+			_, _ = ppods.Remove(PodmanConn(ctx), p.Id, new(ppods.RemoveOptions).WithForce(true).WithTimeout(uint(PodRemoveTimeout(ctx))))
 		}
 	}
 	return nil
@@ -155,10 +155,6 @@ func PodmanCreatePod(ctx context.Context, podName string, ids ...string) (string
 	if err != nil {
 		return "", "", fmt.Errorf("unable to inspect pod %s: %w", ShortId(res.Id), err)
 	}
-	go func() {
-		<-ctx.Done()
-		_ = PodmanPodKill(PodmanConn(ctx), pres.Name)
-	}()
 	return res.Id, pres.InfraContainerID, nil
 }
 
@@ -182,28 +178,29 @@ func PodmanRun(ctx context.Context, id, podId string, env map[string]string, mou
 	if err != nil {
 		return "", fmt.Errorf("unable to create %s: %w", id, err)
 	}
-	go func() {
-		<-ctx.Done()
-		Trace(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("stopping container")
-		if err := pcontainers.Stop(
-			PodmanConn(ctx), res.ID,
-			new(pcontainers.StopOptions).WithIgnore(true).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
-		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) && !perrors.Contains(err, pdefine.ErrNoSuchPod) {
-			Err(ctx, err).Str("id", id).Str("short", ShortId(res.ID)).Msg("unable to stop container")
-		}
-		if _, err := pcontainers.Remove(
-			PodmanConn(ctx), res.ID,
-			new(pcontainers.RemoveOptions).WithForce(true).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
-		); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) && !perrors.Contains(err, pdefine.ErrNoSuchPod) {
-			Err(ctx, err).Str("id", id).Str("short", ShortId(res.ID)).Msg("unable to remove container")
-		}
-	}()
 	// run
 	if err := pcontainers.Start(ctx, res.ID, nil); err != nil {
 		return "", fmt.Errorf("unable to start %s %s: %w", id, ShortId(res.ID), err)
 	}
 	Trace(ctx).Str("id", id).Str("short", ShortId(res.ID)).Msg("container running")
 	return res.ID, nil
+}
+
+// PodmanStopAndRemove stops and removes a container.
+func PodmanStopAndRemove(ctx context.Context, id, containerId string) {
+	Trace(ctx).Str("id", id).Str("short", ShortId(containerId)).Msg("stopping container")
+	if err := pcontainers.Stop(
+		PodmanConn(ctx), containerId,
+		new(pcontainers.StopOptions).WithIgnore(true).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
+	); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) && !perrors.Contains(err, pdefine.ErrNoSuchPod) {
+		Err(ctx, err).Str("id", id).Str("short", ShortId(containerId)).Msg("unable to stop container")
+	}
+	if _, err := pcontainers.Remove(
+		PodmanConn(ctx), containerId,
+		new(pcontainers.RemoveOptions).WithForce(true).WithTimeout(uint(PodRemoveTimeout(ctx).Seconds())),
+	); err != nil && !perrors.Contains(err, pdefine.ErrNoSuchCtr) && !perrors.Contains(err, pdefine.ErrCtrStateInvalid) && !perrors.Contains(err, pdefine.ErrNoSuchPod) {
+		Err(ctx, err).Str("id", id).Str("short", ShortId(containerId)).Msg("unable to remove container")
+	}
 }
 
 // PodmanFollowLogs follows the logs for a container.
@@ -262,8 +259,8 @@ func PodmanWait(parent context.Context, id string) error {
 	return nil
 }
 
-// PodmanServiceWait waits for a container service to be available.
-func PodmanServiceWait(ctx context.Context, id, svc string, f func(context.Context, string, string) error) error {
+// PodmanWaitService waits for a container service to be available.
+func PodmanWaitService(ctx context.Context, id, svc string, f func(context.Context, string, string) error) error {
 	local, remote, err := PodmanGetAddr(ctx, id, svc)
 	if err != nil {
 		return err
