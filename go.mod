@@ -1,6 +1,6 @@
 module github.com/ascii8/nktest
 
-go 1.19
+go 1.20
 
 require (
 	github.com/containers/common v0.55.4
