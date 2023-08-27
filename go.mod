@@ -3,7 +3,7 @@ module github.com/ascii8/nktest
 go 1.19
 
 require (
-	github.com/containers/common v0.55.3
+	github.com/containers/common v0.55.4
 	github.com/containers/podman/v4 v4.6.1
 	github.com/gorilla/websocket v1.5.0
 	github.com/heroiclabs/nakama-common v1.28.1
@@ -32,11 +32,11 @@ require (
 	github.com/containerd/containerd v1.7.2 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3 // indirect
 	github.com/containers/buildah v1.31.2 // indirect
-	github.com/containers/image/v5 v5.26.1 // indirect
+	github.com/containers/image/v5 v5.26.2 // indirect
 	github.com/containers/libtrust v0.0.0-20230121012942-c1716e8a8d01 // indirect
 	github.com/containers/ocicrypt v1.1.7 // indirect
 	github.com/containers/psgo v1.8.0 // indirect
-	github.com/containers/storage v1.48.0 // indirect
+	github.com/containers/storage v1.48.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20230514072755-504adb8a8af1 // indirect
 	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
