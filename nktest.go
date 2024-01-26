@@ -166,14 +166,15 @@ func HttpClient(ctx context.Context) *http.Client {
 func New(ctx, conn context.Context, opts ...Option) {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
+		defer cancel()
 		// catch signals, canceling context to cause cleanup
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 		select {
 		case <-ctx.Done():
+			Trace(ctx).Err(ctx.Err()).Msg("context done")
 		case sig := <-ch:
 			Trace(ctx).Str("sig", sig.String()).Msg("signal")
-			cancel()
 		}
 	}()
 	if globalCtx.ctx != nil {
